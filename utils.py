@@ -1,9 +1,12 @@
 import platform
 
-def detect_platform():
+
+def detect_platform() -> str:
     """
     Detects the current platform and returns the platform string for Chrome for Testing.
     Supported values: "linux64", "win64", "mac-x64", "mac-arm64".
+
+    :return:
     """
     system = platform.system()
     machine = platform.machine().lower()

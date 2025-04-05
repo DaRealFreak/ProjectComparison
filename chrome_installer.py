@@ -18,23 +18,29 @@ class ChromeInstaller:
             self.version = version
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
 
-    def get_latest_version(self):
+    @staticmethod
+    def get_latest_version():
+        """
+        Fetches the latest stable version of Chrome from the API
+
+        :return:
+        """
         url = "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE"
         response = requests.get(url)
         response.raise_for_status()
         return response.text.strip()
 
-    def install_chromedriver(self):
-        tmp_dir = os.path.join(self.base_dir, 'tmp', 'chromedriver')
-        os.makedirs(tmp_dir, exist_ok=True)
-        exe_name = 'chromedriver.exe' if self.platform_str.startswith("win") else 'chromedriver'
-        expected_path = os.path.join(tmp_dir, f'chromedriver-{self.platform_str}', exe_name)
-        if os.path.exists(expected_path):
-            print(f"Found existing chromedriver at: {expected_path}")
-            return expected_path
+    @staticmethod
+    def _download(expected_path: str, tmp_dir: str, url: str, zip_path: str) -> str:
+        """
+        Downloads the chromedriver zip from Chrome for Testing and extracts it
 
-        url = f"https://storage.googleapis.com/chrome-for-testing-public/{self.version}/{self.platform_str}/chromedriver-{self.platform_str}.zip"
-        zip_path = os.path.join(tmp_dir, 'chromedriver.zip')
+        :param expected_path:
+        :param tmp_dir:
+        :param url:
+        :param zip_path:
+        :return:
+        """
         print(f"Downloading chromedriver from {url} ...")
         response = requests.get(url, stream=True)
         response.raise_for_status()
@@ -46,7 +52,30 @@ class ChromeInstaller:
         os.chmod(expected_path, os.stat(expected_path).st_mode | stat.S_IEXEC)
         return expected_path
 
-    def install_chrome(self):
+    def install_chromedriver(self) -> str:
+        """
+        Downloads the chromedriver zip from Chrome for Testing and extracts it
+
+        :return:
+        """
+        tmp_dir = os.path.join(self.base_dir, 'tmp', 'chromedriver')
+        os.makedirs(tmp_dir, exist_ok=True)
+        exe_name = 'chromedriver.exe' if self.platform_str.startswith("win") else 'chromedriver'
+        expected_path = os.path.join(tmp_dir, f'chromedriver-{self.platform_str}', exe_name)
+        if os.path.exists(expected_path):
+            print(f"Found existing chromedriver at: {expected_path}")
+            return expected_path
+
+        url = f"https://storage.googleapis.com/chrome-for-testing-public/{self.version}/{self.platform_str}/chromedriver-{self.platform_str}.zip"
+        zip_path = os.path.join(tmp_dir, 'chromedriver.zip')
+        return self._download(expected_path, tmp_dir, url, zip_path)
+
+    def install_chrome(self) -> str:
+        """
+        Downloads the chrome binary zip from Chrome for Testing and extracts it
+
+        :return:
+        """
         tmp_dir = os.path.join(self.base_dir, 'tmp', 'chrome')
         os.makedirs(tmp_dir, exist_ok=True)
         exe_name = 'chrome.exe' if self.platform_str.startswith("win") else 'chrome'
@@ -57,13 +86,4 @@ class ChromeInstaller:
 
         url = f"https://storage.googleapis.com/chrome-for-testing-public/{self.version}/{self.platform_str}/chrome-{self.platform_str}.zip"
         zip_path = os.path.join(tmp_dir, 'chrome.zip')
-        print(f"Downloading chrome from {url} ...")
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-        with open(zip_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(tmp_dir)
-        os.chmod(expected_path, os.stat(expected_path).st_mode | stat.S_IEXEC)
-        return expected_path
+        return self._download(expected_path, tmp_dir, url, zip_path)
