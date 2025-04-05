@@ -76,7 +76,7 @@ def main():
     parser.add_argument("--output-dir", default="results", help="Output directory (default: results)")
     parser.add_argument("--version", default="latest", help="Chrome for Testing version (default: latest)")
     parser.add_argument("--sizes", help="Comma-separated list of resolutions (e.g., 1024x640,1920x1080,fullscreen)")
-    parser.add_argument('--threshold', type=int, default=0, help="Threshold for pixel difference (default: 0)")
+    parser.add_argument('--threshold', type=float, default=0, help="Threshold for pixel difference (default: 0)")
     parser.add_argument("--always-generate-diff", action="store_true", help="Always generate a diff file even if no differences are found")
     parser.add_argument("--omit-screenshots", action="store_true", help="Omit screenshot capture and diffing")
     parser.add_argument("--user-agent", help="Set a custom user agent")
@@ -110,7 +110,7 @@ def main():
     print(f"Using chrome binary at: {chrome_binary}")
 
     site_comparator = SiteComparator(driver_path, chrome_binary, user_agent=args.user_agent)
-    image_comparator = ImageComparator(threshold=0)
+    image_comparator = ImageComparator(threshold=args.threshold)
 
     # capture live page
     live_html, live_screenshots = capture_page(
