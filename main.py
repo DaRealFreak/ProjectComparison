@@ -115,6 +115,7 @@ class PageDiffProcessor:
         if cookie_file:
             self.site_comparator.load_cookies(cookie_file)
             self.site_comparator.driver.get(url)
+
         time.sleep(2)
         html = self.site_comparator.driver.page_source
         screenshot_paths = {}
@@ -183,13 +184,13 @@ class PageDiffProcessor:
             url=staging_url,
             label="dev",
             output_dir=sub_output_dir,
-            cookie_file=self.args.staging_cookies,
+            cookie_file=self.args.dev_cookies,
             capture_screenshots=not self.args.omit_screenshots
         )
 
         # write HTML to files
-        live_html_file = os.path.join(sub_output_dir, "live.html")
-        staging_html_file = os.path.join(sub_output_dir, "dev.html")
+        live_html_file = os.path.join(sub_output_dir, "html_live.html")
+        staging_html_file = os.path.join(sub_output_dir, "html_dev.html")
         write_to_file(live_html, live_html_file)
         write_to_file(staging_html, staging_html_file)
 
@@ -283,7 +284,7 @@ def main():
     parser.add_argument("--omit-screenshots", action="store_true", help="Omit screenshot capture and diffing")
     parser.add_argument("--user-agent", help="Set a custom user agent")
     parser.add_argument("--live-cookies", help="Path to JSON file containing cookies for the live URL")
-    parser.add_argument("--staging-cookies", help="Path to JSON file containing cookies for the staging URL")
+    parser.add_argument("--dev-cookies", help="Path to JSON file containing cookies for the dev URL")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                         help="Set the logging level (default: INFO)")
     parser.add_argument("--recursive", action="store_true", default=False,

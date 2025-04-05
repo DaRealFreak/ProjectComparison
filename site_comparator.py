@@ -7,6 +7,7 @@ from selenium.webdriver.chrome.service import Service
 
 
 class SiteComparator:
+    DEFAULT_FULLSCREEN_SIZE = (1920, 1080)
     driver = None
 
     def __init__(self, driver_path, chrome_binary, user_agent=None):
@@ -18,6 +19,18 @@ class SiteComparator:
         self.chrome_data_dir = os.path.join(self.base_dir, 'tmp', 'chrome-data')
         os.makedirs(self.chrome_data_dir, exist_ok=True)
         self._init_driver()
+
+    def __del__(self):
+        """
+        Cleans up the WebDriver session when the object is deleted.
+        """
+        self.quit_driver()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Cleans up the WebDriver session when exiting the context manager.
+        """
+        self.quit_driver()
 
     def _init_driver(self):
         """
@@ -43,6 +56,7 @@ class SiteComparator:
         Quits the WebDriver session and cleans up resources.
         """
         if self.driver:
+            self.driver.close()
             self.driver.quit()
             self.driver = None
 
@@ -81,6 +95,8 @@ class SiteComparator:
         :param screenshot_filename:
         :return:
         """
+        # set the window size to a large value to ensure a consistent full-page capture
+        self.driver.set_window_size(self.DEFAULT_FULLSCREEN_SIZE[0], self.DEFAULT_FULLSCREEN_SIZE[1])
         # refresh for a clean state (sliders, etc.)
         self.driver.refresh()
         time.sleep(0.5)
