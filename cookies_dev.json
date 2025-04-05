@@ -1,0 +1,9 @@
+[
+  {
+    "name": "CookieConsent",
+    "value": "mandatory",
+    "domain": "www.d-mind.de.ddev.site",
+    "path": "/",
+    "expiry": 1783815849
+  }
+]
