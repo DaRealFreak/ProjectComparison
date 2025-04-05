@@ -1,9 +1,10 @@
 import logging
 
-from colorama import init, Fore
+from colorama import init, Fore, Style
 
 COLOR_PASS = Fore.GREEN
 COLOR_FAIL = Fore.RED
+RESET_ALL = Style.RESET_ALL
 
 
 def setup_logging(log_level: str = "INFO"):

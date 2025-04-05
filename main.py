@@ -156,6 +156,8 @@ def main():
     write_to_file(result.stdout, html_diff_file)
     logger.info(f"HTML diff saved to: {html_diff_file}")
 
+    # list to collect fail messages for image diffs
+    image_diffs = []
     # compare screenshots if they were captured
     if not args.omit_screenshots:
         for res in resolutions:
@@ -163,27 +165,35 @@ def main():
                 live_img = live_screenshots.get("fullscreen")
                 dev_img = staging_screenshots.get("fullscreen")
                 diff_filename = "fullscreen_screenshot_diff.png"
+                label_str = "fullscreen"
             else:
                 w, h = res
                 live_img = live_screenshots.get((w, h))
                 dev_img = staging_screenshots.get((w, h))
                 diff_filename = f"{w}x{h}_screenshot_diff.png"
+                label_str = f"{w}x{h}p"
             if live_img and dev_img:
                 diff_filename = os.path.join(output_dir, diff_filename)
-                if image_comparator.compare_screenshots(live_img, dev_img, diff_filename, args.always_generate_diff):
+                diff = image_comparator.compare_screenshots(live_img, dev_img, diff_filename, args.always_generate_diff)
+                if diff > args.threshold:
                     logger.info(f"Screenshot diff saved to: {diff_filename}")
+                    image_diffs.append(f"{label_str} ({diff:.4f})")
                 else:
                     logger.info(f"No differences detected for {diff_filename}.")
 
     site_comparator.quit_driver()
 
-    try:
-        if os.path.getsize(html_diff_file) > 0:
-            print(logging_config.COLOR_FAIL + f"[FAIL] - {args.url_live} ({args.url_staging}) - HTML differences found")
-        else:
-            print(logging_config.COLOR_PASS + f"[PASS] - {args.url_live} ({args.url_staging}) - No HTML differences")
-    except Exception as e:
-        logger.info(f"Error reading diff file: {e}")
+    # determine overall status
+    html_fail = os.path.getsize(html_diff_file) > 0
+    if html_fail or image_diffs:
+        fail_msg = f"[FAIL] - {args.url_live} ({args.url_staging})"
+        if html_fail:
+            fail_msg += " - HTML differences found"
+        if image_diffs:
+            fail_msg += " - Image differences: " + ", ".join(image_diffs)
+        print(logging_config.COLOR_FAIL + fail_msg + logging_config.Style.RESET_ALL)
+    else:
+        print(logging_config.COLOR_PASS + f"[PASS] - {args.url_live} ({args.url_staging}) - No differences" + logging_config.Style.RESET_ALL)
 
 
 if __name__ == '__main__':

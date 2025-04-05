@@ -16,7 +16,7 @@ class ImageComparator:
         self.threshold = threshold
 
     def compare_screenshots(self, img1_path: str, img2_path: str, diff_output_path: str,
-                            always_generate_diff: bool = False) -> bool:
+                            always_generate_diff: bool = False) -> float:
         """
         Compares two screenshots and saves a diff image if the average pixel difference
         exceeds the threshold.
@@ -25,7 +25,7 @@ class ImageComparator:
         :param img2_path: Path to second image.
         :param diff_output_path: Path to save the diff image.
         :param always_generate_diff: If True, always generate the diff image regardless of the threshold.
-        :return: True if diff image was created, otherwise False.
+        :return: Average pixel difference between the two images.
         """
         # open images and convert them to RGB for consistency
         img1 = Image.open(img1_path).convert('RGB')
@@ -37,4 +37,4 @@ class ImageComparator:
         if avg_diff > self.threshold or always_generate_diff:
             diff.save(diff_output_path)
 
-        return avg_diff > self.threshold
+        return avg_diff
