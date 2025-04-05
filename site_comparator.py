@@ -30,6 +30,7 @@ class SiteComparator:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-extensions")
         options.add_argument(f"--user-data-dir={self.chrome_data_dir}")
+        options.add_experimental_option("excludeSwitches", ["enable-logging"])
 
         if self.user_agent:
             options.add_argument(f"--user-agent={self.user_agent}")

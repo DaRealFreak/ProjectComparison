@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 import argparse
+import logging
 import os
 import subprocess
 import time
 
+import logging_config
 from chrome_installer import ChromeInstaller
 from image_comparator import ImageComparator
 from site_comparator import SiteComparator
+
+logger = logging.getLogger(__name__)
 
 
 def write_to_file(content: str, filename: str):
@@ -77,12 +81,17 @@ def main():
     parser.add_argument("--version", default="latest", help="Chrome for Testing version (default: latest)")
     parser.add_argument("--sizes", help="Comma-separated list of resolutions (e.g., 1024x640,1920x1080,fullscreen)")
     parser.add_argument('--threshold', type=float, default=0, help="Threshold for pixel difference (default: 0)")
-    parser.add_argument("--always-generate-diff", action="store_true", help="Always generate a diff file even if no differences are found")
+    parser.add_argument("--always-generate-diff", action="store_true",
+                        help="Always generate a diff file even if no differences are found")
     parser.add_argument("--omit-screenshots", action="store_true", help="Omit screenshot capture and diffing")
     parser.add_argument("--user-agent", help="Set a custom user agent")
     parser.add_argument("--live-cookies", help="Path to JSON file containing cookies for the live URL")
     parser.add_argument("--staging-cookies", help="Path to JSON file containing cookies for the staging URL")
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                        help="Set the logging level (default: INFO)")
+
     args = parser.parse_args()
+    logging_config.setup_logging(args.log_level)
 
     output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
@@ -99,20 +108,21 @@ def main():
                     w, h = map(int, r.split('x'))
                     resolutions.append((w, h))
                 except Exception:
-                    print(f"Invalid resolution format: {res}")
+                    logger.error(f"Invalid resolution format: {res}")
     else:
         resolutions = [(1920, 1080)]
 
     installer = ChromeInstaller(version=args.version)
     driver_path = installer.install_chromedriver()
     chrome_binary = installer.install_chrome()
-    print(f"Using chromedriver at: {driver_path}")
-    print(f"Using chrome binary at: {chrome_binary}")
+    logger.info(f"Using chromedriver at: {driver_path}")
+    logger.info(f"Using chrome binary at: {chrome_binary}")
 
     site_comparator = SiteComparator(driver_path, chrome_binary, user_agent=args.user_agent)
     image_comparator = ImageComparator(threshold=args.threshold)
 
     # capture live page
+    logger.info("Capturing live page...")
     live_html, live_screenshots = capture_page(
         site_comparator,
         args.url_live,
@@ -126,6 +136,7 @@ def main():
     write_to_file(live_html, live_html_file)
 
     # capture dev page
+    logger.info("Capturing staging page...")
     staging_html, staging_screenshots = capture_page(
         site_comparator,
         args.url_staging,
@@ -143,7 +154,7 @@ def main():
     result = subprocess.run(diff_cmd, stdout=subprocess.PIPE, text=True)
     html_diff_file = os.path.join(output_dir, "html-difference.diff")
     write_to_file(result.stdout, html_diff_file)
-    print(f"HTML diff saved to: {html_diff_file}")
+    logger.info(f"HTML diff saved to: {html_diff_file}")
 
     # compare screenshots if they were captured
     if not args.omit_screenshots:
@@ -158,12 +169,21 @@ def main():
                 dev_img = staging_screenshots.get((w, h))
                 diff_filename = f"{w}x{h}_screenshot_diff.png"
             if live_img and dev_img:
-                diff_output_filename = os.path.join(output_dir, diff_filename)
-                if image_comparator.compare_screenshots(live_img, dev_img, diff_output_filename, args.always_generate_diff):
-                    print(f"Screenshot diff saved to: {diff_output_filename}")
+                diff_filename = os.path.join(output_dir, diff_filename)
+                if image_comparator.compare_screenshots(live_img, dev_img, diff_filename, args.always_generate_diff):
+                    logger.info(f"Screenshot diff saved to: {diff_filename}")
                 else:
-                    print(f"No differences detected for {diff_filename}.")
+                    logger.info(f"No differences detected for {diff_filename}.")
+
     site_comparator.quit_driver()
+
+    try:
+        if os.path.getsize(html_diff_file) > 0:
+            print(logging_config.COLOR_FAIL + f"[FAIL] - {args.url_live} ({args.url_staging}) - HTML differences found")
+        else:
+            print(logging_config.COLOR_PASS + f"[PASS] - {args.url_live} ({args.url_staging}) - No HTML differences")
+    except Exception as e:
+        logger.info(f"Error reading diff file: {e}")
 
 
 if __name__ == '__main__':

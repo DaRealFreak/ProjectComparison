@@ -1,3 +1,4 @@
+import logging
 import os
 import stat
 import zipfile
@@ -5,6 +6,8 @@ import zipfile
 import requests
 
 from utils import detect_platform
+
+logger = logging.getLogger(__name__)
 
 
 class ChromeInstaller:
@@ -15,7 +18,7 @@ class ChromeInstaller:
         # if version is "latest", fetch it from the API
         if version.lower() == "latest":
             self.version = self.get_latest_version()
-            print(f"Latest stable version detected: {self.version}")
+            logger.debug(f"Latest stable version detected: {self.version}")
         else:
             self.version = version
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -42,7 +45,7 @@ class ChromeInstaller:
         :param zip_path:
         :return:
         """
-        print(f"Downloading chromedriver from {url} ...")
+        logger.info(f"Downloading chromedriver from {url} ...")
         response = requests.get(url, stream=True)
         response.raise_for_status()
         with open(zip_path, 'wb') as f:
@@ -64,7 +67,7 @@ class ChromeInstaller:
         exe_name = 'chromedriver.exe' if self.platform_str.startswith("win") else 'chromedriver'
         expected_path = os.path.join(tmp_dir, f'chromedriver-{self.platform_str}', exe_name)
         if os.path.exists(expected_path):
-            print(f"Found existing chromedriver at: {expected_path}")
+            logger.debug(f"Chromedriver zip already downloaded: {expected_path}")
             return expected_path
 
         url = f"https://storage.googleapis.com/chrome-for-testing-public/{self.version}/{self.platform_str}/chromedriver-{self.platform_str}.zip"
@@ -82,7 +85,7 @@ class ChromeInstaller:
         exe_name = 'chrome.exe' if self.platform_str.startswith("win") else 'chrome'
         expected_path = os.path.join(tmp_dir, f'chrome-{self.platform_str}', exe_name)
         if os.path.exists(expected_path):
-            print(f"Found existing chrome binary at: {expected_path}")
+            logger.debug(f"Chrome binary zip already downloaded: {expected_path}")
             return expected_path
 
         url = f"https://storage.googleapis.com/chrome-for-testing-public/{self.version}/{self.platform_str}/chrome-{self.platform_str}.zip"

@@ -1,4 +1,8 @@
+import logging
+
 from PIL import Image, ImageChops, ImageStat
+
+logger = logging.getLogger(__name__)
 
 
 class ImageComparator:
@@ -29,7 +33,7 @@ class ImageComparator:
         diff = ImageChops.difference(img1, img2)
         stat = ImageStat.Stat(diff)
         avg_diff = sum(stat.mean) / len(stat.mean)
-        print(f"Average difference for {img1_path} vs {img2_path}: {avg_diff}")
+        logger.info(f"Average difference for {img1_path} vs {img2_path}: {avg_diff}")
         if avg_diff > self.threshold or always_generate_diff:
             diff.save(diff_output_path)
 
