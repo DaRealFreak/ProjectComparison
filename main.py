@@ -2,58 +2,57 @@
 import argparse
 import os
 import subprocess
+import tempfile
 import time
 
 from chrome_installer import ChromeInstaller
 from site_comparator import SiteComparator
 
-
 def write_to_file(content, filename):
     with open(filename, 'w', encoding='utf-8') as f:
         f.write(content)
 
-
-def compare_screenshots(img1_path, img2_path, diff_output_path):
-    from PIL import Image, ImageChops
-    img1 = Image.open(img1_path)
-    img2 = Image.open(img2_path)
+def compare_screenshots(img1_path, img2_path, diff_output_path, threshold=5):
+    from PIL import Image, ImageChops, ImageStat
+    # Open images and convert to RGB for consistency.
+    img1 = Image.open(img1_path).convert('RGB')
+    img2 = Image.open(img2_path).convert('RGB')
     diff = ImageChops.difference(img1, img2)
-    if diff.getbbox() is not None:
+    stat = ImageStat.Stat(diff)
+    avg_diff = sum(stat.mean) / len(stat.mean)
+    print(f"Average difference for {img1_path} vs {img2_path}: {avg_diff}")
+    if avg_diff > threshold:
         diff.save(diff_output_path)
         return True
     return False
 
-
 def capture_page(comparator, url, label, resolutions, output_dir):
     """
-    Navigates to the URL, waits for the page to load, then:
+    Navigates to the URL once, waits for the page to load, then:
       - Captures the HTML.
-      - Captures a default screenshot (using the first resolution or a default).
-      - Captures screenshots at each specified resolution (by resizing the window).
-    Saves files in output_dir using the label (e.g. "live" or "dev").
-    Returns the HTML content and a dictionary mapping each resolution to its screenshot path.
+      - For each resolution in 'resolutions':
+            * If resolution is a tuple (w, h), sets the window size and saves a screenshot.
+            * If resolution equals "fullscreen", uses Chrome's CDP command to capture a full-page screenshot.
+    Returns the HTML content and a dictionary mapping each resolution (tuple or "fullscreen")
+    to its screenshot path.
     """
     comparator.driver.get(url)
     time.sleep(3)
     html = comparator.driver.page_source
     screenshot_paths = {}
-    if resolutions:
-        default_res = resolutions[0]
-    else:
-        default_res = (1280, 720)
-    comparator.driver.set_window_size(*default_res)
-    default_path = os.path.join(output_dir, f"{label}.png")
-    comparator.driver.save_screenshot(default_path)
-    screenshot_paths['default'] = default_path
-    for (w, h) in resolutions:
-        comparator.driver.set_window_size(w, h)
-        filename = os.path.join(output_dir, f"{label}_{w}x{h}.png")
-        # Give a short delay after resizing before taking screenshot.
-        time.sleep(1)
-        comparator.driver.save_screenshot(filename)
-        screenshot_paths[(w, h)] = filename
+    for res in resolutions:
+        if isinstance(res, str) and res == "fullscreen":
+            filename = os.path.join(output_dir, f"fullscreen_{label}.png")
+            comparator.take_fullscreen_screenshot(filename)
+            screenshot_paths["fullscreen"] = filename
+        else:
+            w, h = res
+            filename = os.path.join(output_dir, f"{w}x{h}_{label}.png")
+            comparator.driver.set_window_size(w, h)
+            time.sleep(1)  # short delay after resizing
+            comparator.driver.save_screenshot(filename)
+            screenshot_paths[(w, h)] = filename
     return html, screenshot_paths
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -64,24 +63,27 @@ def main():
     parser.add_argument("--output-dir", default="results", help="Output directory (default: results)")
     parser.add_argument("--version", default="latest", help="Chrome for Testing version (default: latest)")
     parser.add_argument("--omit-screenshots", action="store_true", help="Omit screenshot comparison")
-    parser.add_argument("--sizes", help="Comma-separated list of resolutions (e.g., 1024x640,1366x768,1920x1080)")
+    parser.add_argument("--sizes", help="Comma-separated list of resolutions (e.g., 1024x640,1366x768,1920x1080,fullscreen)")
     args = parser.parse_args()
 
     output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
-    # Parse resolutions if provided.
+    # Parse resolutions. If --sizes is not supplied, default to 1920x1080.
     resolutions = []
     if args.sizes:
         for res in args.sizes.split(','):
-            try:
-                w, h = map(int, res.lower().split('x'))
-                resolutions.append((w, h))
-            except Exception:
-                print(f"Invalid resolution format: {res}")
+            r = res.strip().lower()
+            if r == "fullscreen":
+                resolutions.append("fullscreen")
+            else:
+                try:
+                    w, h = map(int, r.split('x'))
+                    resolutions.append((w, h))
+                except Exception:
+                    print(f"Invalid resolution format: {res}")
     else:
-        # If no sizes are provided, use a default resolution.
-        resolutions = [(1280, 720)]
+        resolutions = [(1920, 1080)]
 
     installer = ChromeInstaller(version=args.version)
     driver_path = installer.install_chromedriver()
@@ -108,19 +110,25 @@ def main():
     write_to_file(result.stdout, html_diff_file)
     print(f"HTML diff saved to: {html_diff_file}")
 
-    # Compare screenshots at each resolution and save diff images.
+    # Compare screenshots for each resolution.
     if not args.omit_screenshots:
-        for (w, h) in resolutions:
-            live_img = live_screenshots.get((w, h))
-            dev_img = staging_screenshots.get((w, h))
+        for res in resolutions:
+            if isinstance(res, str) and res == "fullscreen":
+                live_img = live_screenshots.get("fullscreen")
+                dev_img = staging_screenshots.get("fullscreen")
+                diff_filename = "fullscreen_screenshot_diff.png"
+            else:
+                w, h = res
+                live_img = live_screenshots.get((w, h))
+                dev_img = staging_screenshots.get((w, h))
+                diff_filename = f"{w}x{h}_screenshot_diff.png"
             if live_img and dev_img:
-                diff_output_filename = os.path.join(output_dir, f"screenshot_diff_{w}x{h}.png")
+                diff_output_filename = os.path.join(output_dir, diff_filename)
                 if compare_screenshots(live_img, dev_img, diff_output_filename):
-                    print(f"Screenshot diff for resolution {w}x{h} saved to: {diff_output_filename}")
+                    print(f"Screenshot diff saved to: {diff_output_filename}")
                 else:
-                    print(f"No differences detected at resolution {w}x{h}.")
+                    print(f"No differences detected for {diff_filename}.")
     comparator.quit_driver()
-
 
 if __name__ == '__main__':
     main()

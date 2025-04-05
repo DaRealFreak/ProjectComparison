@@ -1,6 +1,6 @@
+# site_comparator.py
 import os
 import time
-
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 
@@ -33,12 +33,32 @@ class SiteComparator:
 
     def fetch_html(self, url):
         self.driver.get(url)
-        time.sleep(3)  # Adjust delay as needed for dynamic content
+        time.sleep(3)  # Wait for page to load dynamic content
         return self.driver.page_source
 
     def take_screenshot(self, url, width, height, screenshot_filename):
-        # Assumes the page is already loaded (driver.get(url) has been called).
+        # For regular screenshots, simply set window size and capture.
         self.driver.set_window_size(width, height)
-        # No need to reload the page
-        time.sleep(1)  # A short delay after resizing if needed
+        time.sleep(1)  # short delay after resizing
         self.driver.save_screenshot(screenshot_filename)
+
+    def take_fullscreen_screenshot(self, screenshot_filename):
+        # Use Chrome DevTools Protocol to capture full-page screenshot.
+        metrics = self.driver.execute_cdp_cmd("Page.getLayoutMetrics", {})
+        contentSize = metrics["contentSize"]
+        screenshot_config = {
+            "captureBeyondViewport": True,
+            "fromSurface": True,
+            "clip": {
+                "x": 0,
+                "y": 0,
+                "width": contentSize["width"],
+                "height": contentSize["height"],
+                "scale": 1
+            }
+        }
+        result = self.driver.execute_cdp_cmd("Page.captureScreenshot", screenshot_config)
+        import base64
+        data = result.get("data")
+        with open(screenshot_filename, "wb") as f:
+            f.write(base64.b64decode(data))
