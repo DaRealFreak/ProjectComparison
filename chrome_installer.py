@@ -8,9 +8,11 @@ from utils import detect_platform
 
 
 class ChromeInstaller:
+    LATEST_VERSION_URL = "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE"
+
     def __init__(self, version="latest"):
         self.platform_str = detect_platform()
-        # If version is "latest", fetch it from the API.
+        # if version is "latest", fetch it from the API
         if version.lower() == "latest":
             self.version = self.get_latest_version()
             print(f"Latest stable version detected: {self.version}")
@@ -25,8 +27,7 @@ class ChromeInstaller:
 
         :return:
         """
-        url = "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE"
-        response = requests.get(url)
+        response = requests.get(ChromeInstaller.LATEST_VERSION_URL)
         response.raise_for_status()
         return response.text.strip()
 

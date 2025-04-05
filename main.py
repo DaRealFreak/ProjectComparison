@@ -5,7 +5,7 @@ import subprocess
 import time
 
 from chrome_installer import ChromeInstaller
-from image_comparator import compare_screenshots
+from image_comparator import ImageComparator
 from site_comparator import SiteComparator
 
 
@@ -45,29 +45,24 @@ def capture_page(comparator: SiteComparator, url: str, label: str, resolutions: 
     comparator.driver.get(url)
     if cookie_file:
         comparator.load_cookies(cookie_file)
-        # Refresh after cookies are added.
+        # refresh after cookies are added (selenium can only add cookies while we're on the domain)
         comparator.driver.get(url)
 
-    # Wait a little to let the page settle.
+    # sleep 2 seconds to let the JavaScript load/restructure elements (f.e. galleries/sliders)
     time.sleep(2)
     html = comparator.driver.page_source
     screenshot_paths = {}
     if capture_screenshots:
         for res in resolutions:
+            # special case for "fullscreen"
             if isinstance(res, str) and res == "fullscreen":
                 filename = os.path.join(output_dir, f"fullscreen_{label}.png")
-                comparator.driver.refresh()
-                time.sleep(0.5)
                 comparator.take_fullscreen_screenshot(filename)
                 screenshot_paths["fullscreen"] = filename
             else:
                 w, h = res
                 filename = os.path.join(output_dir, f"{w}x{h}_{label}.png")
-                comparator.driver.set_window_size(w, h)
-                comparator.driver.refresh()
-                # A short delay after resizing.
-                time.sleep(0.5)
-                comparator.driver.save_screenshot(filename)
+                comparator.take_screenshot(w, h, filename)
                 screenshot_paths[(w, h)] = filename
     return html, screenshot_paths
 
@@ -80,9 +75,10 @@ def main():
     parser.add_argument("url_staging", help="Staging URL")
     parser.add_argument("--output-dir", default="results", help="Output directory (default: results)")
     parser.add_argument("--version", default="latest", help="Chrome for Testing version (default: latest)")
+    parser.add_argument("--sizes", help="Comma-separated list of resolutions (e.g., 1024x640,1920x1080,fullscreen)")
+    parser.add_argument('--threshold', type=int, default=0, help="Threshold for pixel difference (default: 0)")
+    parser.add_argument("--always-generate-diff", action="store_true", help="Always generate a diff file even if no differences are found")
     parser.add_argument("--omit-screenshots", action="store_true", help="Omit screenshot capture and diffing")
-    parser.add_argument("--sizes",
-                        help="Comma-separated list of resolutions (e.g., 1024x640,1366x768,1920x1080,fullscreen)")
     parser.add_argument("--user-agent", help="Set a custom user agent")
     parser.add_argument("--live-cookies", help="Path to JSON file containing cookies for the live URL")
     parser.add_argument("--staging-cookies", help="Path to JSON file containing cookies for the staging URL")
@@ -91,7 +87,7 @@ def main():
     output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
-    # Parse resolutions. If --sizes is not supplied, default to 1920x1080.
+    # parse resolutions. if --sizes is not supplied, default to 1920x1080
     resolutions = []
     if args.sizes:
         for res in args.sizes.split(','):
@@ -113,11 +109,12 @@ def main():
     print(f"Using chromedriver at: {driver_path}")
     print(f"Using chrome binary at: {chrome_binary}")
 
-    comparator = SiteComparator(driver_path, chrome_binary, user_agent=args.user_agent)
+    site_comparator = SiteComparator(driver_path, chrome_binary, user_agent=args.user_agent)
+    image_comparator = ImageComparator(threshold=0)
 
-    # Capture live page.
+    # capture live page
     live_html, live_screenshots = capture_page(
-        comparator,
+        site_comparator,
         args.url_live,
         "live",
         resolutions,
@@ -128,9 +125,9 @@ def main():
     live_html_file = os.path.join(output_dir, "live.html")
     write_to_file(live_html, live_html_file)
 
-    # Capture staging (dev) page.
+    # capture dev page
     staging_html, staging_screenshots = capture_page(
-        comparator,
+        site_comparator,
         args.url_staging,
         "dev",
         resolutions,
@@ -141,14 +138,14 @@ def main():
     staging_html_file = os.path.join(output_dir, "dev.html")
     write_to_file(staging_html, staging_html_file)
 
-    # Generate HTML diff.
+    # generate HTML diff (using git diff here for windows compatibility since the diff tool is not commonly available)
     diff_cmd = ["git", "diff", "--no-index", live_html_file, staging_html_file]
     result = subprocess.run(diff_cmd, stdout=subprocess.PIPE, text=True)
     html_diff_file = os.path.join(output_dir, "html-difference.diff")
     write_to_file(result.stdout, html_diff_file)
     print(f"HTML diff saved to: {html_diff_file}")
 
-    # Compare screenshots if they were captured.
+    # compare screenshots if they were captured
     if not args.omit_screenshots:
         for res in resolutions:
             if isinstance(res, str) and res == "fullscreen":
@@ -162,11 +159,11 @@ def main():
                 diff_filename = f"{w}x{h}_screenshot_diff.png"
             if live_img and dev_img:
                 diff_output_filename = os.path.join(output_dir, diff_filename)
-                if compare_screenshots(live_img, dev_img, diff_output_filename, threshold=0):
+                if image_comparator.compare_screenshots(live_img, dev_img, diff_output_filename, args.always_generate_diff):
                     print(f"Screenshot diff saved to: {diff_output_filename}")
                 else:
                     print(f"No differences detected for {diff_filename}.")
-    comparator.quit_driver()
+    site_comparator.quit_driver()
 
 
 if __name__ == '__main__':

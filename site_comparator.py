@@ -14,7 +14,7 @@ class SiteComparator:
         self.chrome_binary = chrome_binary
         self.user_agent = user_agent
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        # Create a dedicated data directory for Chrome under tmp/chrome-data
+        # create a dedicated data directory for Chrome under tmp/chrome-data
         self.chrome_data_dir = os.path.join(self.base_dir, 'tmp', 'chrome-data')
         os.makedirs(self.chrome_data_dir, exist_ok=True)
         self._init_driver()
@@ -65,9 +65,12 @@ class SiteComparator:
         :param screenshot_filename:
         :return:
         """
-        # For regular screenshots: set window size and capture.
         self.driver.set_window_size(width, height)
-        time.sleep(1)
+
+        # refresh for a clean state (sliders, etc.)
+        self.driver.refresh()
+        time.sleep(0.5)
+
         self.driver.save_screenshot(screenshot_filename)
 
     def take_fullscreen_screenshot(self, screenshot_filename: str):
@@ -77,7 +80,11 @@ class SiteComparator:
         :param screenshot_filename:
         :return:
         """
-        # Use Chrome DevTools Protocol to capture a full-page screenshot.
+        # refresh for a clean state (sliders, etc.)
+        self.driver.refresh()
+        time.sleep(0.5)
+
+        # use Chrome DevTools Protocol to capture a full-page screenshot
         metrics = self.driver.execute_cdp_cmd("Page.getLayoutMetrics", {})
         content_size = metrics["contentSize"]
         screenshot_config = {
