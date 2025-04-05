@@ -2,6 +2,7 @@
 import argparse
 import logging
 import os
+import shutil
 import subprocess
 import time
 from argparse import Namespace
@@ -272,6 +273,7 @@ def main():
     parser.add_argument("url_live", help="Live URL")
     parser.add_argument("url_staging", help="Staging URL")
     parser.add_argument("--output-dir", default="results", help="Output directory (default: results)")
+    parser.add_argument('--remove-previous_results', action='store_true', help="Remove previous results before running")
     parser.add_argument("--version", default="latest", help="Chrome for Testing version (default: latest)")
     parser.add_argument("--sizes",
                         help="Comma-separated list of resolutions (e.g., 1024x640,1920x1080,fullscreen)")
@@ -292,6 +294,9 @@ def main():
     logging_config.setup_logging(args.log_level)
 
     output_dir = args.output_dir
+    if args.remove_previous_results and os.path.exists(output_dir):
+        logger.info(f"Removing previous results in {output_dir}...")
+        shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     # parse resolutions. if --sizes is not supplied, default to 1920x1080.
