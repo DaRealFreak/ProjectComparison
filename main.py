@@ -5,8 +5,7 @@ import os
 import shutil
 import subprocess
 import time
-from argparse import Namespace
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse, quote
 
 from bs4 import BeautifulSoup
 
@@ -18,9 +17,42 @@ from site_comparator import SiteComparator
 logger = logging.getLogger(__name__)
 
 
+def write_to_file(content: str, filename: str):
+    """
+    Writes the given content to a file with UTF-8 encoding.
+
+    :param content:
+    :param filename:
+    :return:
+    """
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+
+def inject_auth(url: str, username: str, password: str) -> str:
+    """
+    Injects HTTP Basic Auth credentials into a URL.
+    For example, inject_auth("https://example.com/path", "user", "pass")
+    returns "https://user:pass@example.com/path".
+
+    :param url:
+    :param username:
+    :param password:
+    :return:
+    """
+    parsed = urlparse(url)
+    # remove any existing auth credentials.
+    netloc = parsed.netloc.split("@")[-1]
+    # URL-encode the username and password in case they contain special characters.
+    user_info = f"{quote(username)}:{quote(password)}"
+    new_netloc = f"{user_info}@{netloc}"
+    new_parsed = parsed._replace(netloc=new_netloc)
+    return str(urlunparse(new_parsed))
+
+
 class PageDiffProcessor:
     def __init__(self, site_comparator: SiteComparator, image_comparator: ImageComparator,
-                 output_dir: str, args: Namespace):
+                 output_dir: str, args: argparse.Namespace):
         """
         Initializes the processor with a SiteComparator instance, an ImageComparator instance,
         the base output directory, and the parsed arguments.
@@ -85,17 +117,17 @@ class PageDiffProcessor:
         return links
 
     @staticmethod
-    def get_staging_url(live_url: str, live_base: str, staging_base: str) -> str:
+    def get_dev_url(live_url: str, live_base: str, dev_base: str) -> str:
         """
-        Return the staging URL corresponding to a live URL.
+        Return the dev URL corresponding to a live URL.
 
         :param live_url:
         :param live_base:
-        :param staging_base:
+        :param dev_base:
         :return:
         """
         if live_url.startswith(live_base):
-            return staging_base + live_url[len(live_base):]
+            return dev_base + live_url[len(live_base):]
         return ''
 
     def capture_page(self, url: str, label: str, output_dir: str, cookie_file: str = None,
@@ -111,6 +143,10 @@ class PageDiffProcessor:
         :param capture_screenshots:
         :return:
         """
+        # inject HTTP Basic Auth credentials if provided.
+        if self.args.htuser and self.args.htpass:
+            url = inject_auth(url, self.args.htuser, self.args.htpass)
+
         self.site_comparator.driver.get(url)
         if cookie_file:
             self.site_comparator.load_cookies(cookie_file)
@@ -135,12 +171,12 @@ class PageDiffProcessor:
     def process_page(
             self,
             live_url: str,
-            staging_url: str,
+            dev_url: str,
             output_dir: str,
             current_level: int,
             max_level: int,
             live_base: str,
-            staging_base: str,
+            dev_base: str,
             visited: set
     ):
         """
@@ -148,12 +184,12 @@ class PageDiffProcessor:
         and recursively processes internal links if allowed.
 
         :param live_url:
-        :param staging_url:
+        :param dev_url:
         :param output_dir:
         :param current_level:
         :param max_level:
         :param live_base:
-        :param staging_base:
+        :param dev_base:
         :param visited:
         :return:
         """
@@ -179,9 +215,9 @@ class PageDiffProcessor:
             capture_screenshots=not self.args.omit_screenshots
         )
 
-        # capture staging page
-        staging_html, staging_screenshots = self.capture_page(
-            url=staging_url,
+        # capture dev page
+        dev_html, dev_screenshots = self.capture_page(
+            url=dev_url,
             label="dev",
             output_dir=sub_output_dir,
             cookie_file=self.args.dev_cookies,
@@ -190,12 +226,12 @@ class PageDiffProcessor:
 
         # write HTML to files
         live_html_file = os.path.join(sub_output_dir, "html_live.html")
-        staging_html_file = os.path.join(sub_output_dir, "html_dev.html")
+        dev_html_file = os.path.join(sub_output_dir, "html_dev.html")
         write_to_file(live_html, live_html_file)
-        write_to_file(staging_html, staging_html_file)
+        write_to_file(dev_html, dev_html_file)
 
         # generate HTML diff
-        diff_cmd = ["git", "diff", "--no-index", live_html_file, staging_html_file]
+        diff_cmd = ["git", "diff", "--no-index", live_html_file, dev_html_file]
         result = subprocess.run(diff_cmd, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
         html_diff_file = os.path.join(sub_output_dir, "html-difference.diff")
         write_to_file(result.stdout, html_diff_file)
@@ -205,13 +241,13 @@ class PageDiffProcessor:
         for res in self.args.resolutions:
             if isinstance(res, str) and res == "fullscreen":
                 live_img = live_screenshots.get("fullscreen")
-                dev_img = staging_screenshots.get("fullscreen")
+                dev_img = dev_screenshots.get("fullscreen")
                 diff_filename = "fullscreen_screenshot_diff.png"
                 label_str = "fullscreen"
             else:
                 w, h = res
                 live_img = live_screenshots.get((w, h))
-                dev_img = staging_screenshots.get((w, h))
+                dev_img = dev_screenshots.get((w, h))
                 diff_filename = f"{w}x{h}_screenshot_diff.png"
                 label_str = f"{w}x{h}p"
 
@@ -232,7 +268,7 @@ class PageDiffProcessor:
         # log summary for this page
         html_fail = os.path.getsize(html_diff_file) > 0
         if html_fail or image_diffs:
-            fail_msg = f"[FAIL] - {live_url} ({staging_url})"
+            fail_msg = f"[FAIL] - {live_url} ({dev_url})"
             if html_fail:
                 fail_msg += " - HTML differences found"
             if image_diffs:
@@ -240,7 +276,7 @@ class PageDiffProcessor:
             logger.info(fail_msg)
             print(logging_config.COLOR_FAIL + fail_msg + logging_config.RESET_ALL)
         else:
-            pass_msg = f"[PASS] - {live_url} ({staging_url}) - No differences"
+            pass_msg = f"[PASS] - {live_url} ({dev_url}) - No differences"
             logger.info(pass_msg)
             print(logging_config.COLOR_PASS + pass_msg + logging_config.RESET_ALL)
 
@@ -249,22 +285,10 @@ class PageDiffProcessor:
             sub_links = self.extract_internal_links(live_html, live_url)
             for link in sub_links:
                 if link not in visited:
-                    sub_staging = self.get_staging_url(link, live_base, staging_base)
-                    if sub_staging:
-                        self.process_page(link, sub_staging, output_dir, current_level + 1, max_level, live_base,
-                                          staging_base, visited)
-
-
-def write_to_file(content: str, filename: str):
-    """
-    Writes the given content to a file with UTF-8 encoding.
-
-    :param content:
-    :param filename:
-    :return:
-    """
-    with open(filename, 'w', encoding='utf-8') as f:
-        f.write(content)
+                    sub_dev = self.get_dev_url(link, live_base, dev_base)
+                    if sub_dev:
+                        self.process_page(link, sub_dev, output_dir, current_level + 1, max_level, live_base,
+                                          dev_base, visited)
 
 
 def main():
@@ -272,7 +296,7 @@ def main():
         description="Generate HTML and screenshot diffs between two URLs (and optionally recursively), saving results in a structured folder."
     )
     parser.add_argument("url_live", help="Live URL")
-    parser.add_argument("url_staging", help="Staging URL")
+    parser.add_argument("url_dev", help="Dev URL")
     parser.add_argument("--output-dir", default="results", help="Output directory (default: results)")
     parser.add_argument('--remove-previous_results', action='store_true', help="Remove previous results before running")
     parser.add_argument("--version", default="latest", help="Chrome for Testing version (default: latest)")
@@ -285,6 +309,8 @@ def main():
     parser.add_argument("--user-agent", help="Set a custom user agent")
     parser.add_argument("--live-cookies", help="Path to JSON file containing cookies for the live URL")
     parser.add_argument("--dev-cookies", help="Path to JSON file containing cookies for the dev URL")
+    parser.add_argument("--htuser", help="HTTP auth username")
+    parser.add_argument("--htpass", help="HTTP auth password")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
                         help="Set the logging level (default: INFO)")
     parser.add_argument("--recursive", action="store_true", default=False,
@@ -328,19 +354,18 @@ def main():
 
     processor = PageDiffProcessor(site_comparator, image_comparator, output_dir, args)
 
-    # process the base page.
-    logger.info("Capturing base page...")
-    processor.process_page(args.url_live, args.url_staging, output_dir, 0, args.recursive_max_level,
-                           args.url_live, args.url_staging, set())
+    logger.info("Processing base page...")
+    processor.process_page(args.url_live, args.url_dev, output_dir, 0, args.recursive_max_level,
+                           args.url_live, args.url_dev, set())
 
     try:
         html_diff_file = os.path.join(output_dir, "html-difference.diff")
         if os.path.getsize(html_diff_file) > 0 or processor.image_diffs:
             print(
-                logging_config.COLOR_FAIL + f"[FAIL] - {args.url_live} ({args.url_staging}) - HTML differences or image differences: {', '.join(processor.image_diffs)}" + logging_config.RESET_ALL)
+                logging_config.COLOR_FAIL + f"[FAIL] - {args.url_live} ({args.url_dev}) - HTML differences or image differences: {', '.join(processor.image_diffs)}" + logging_config.RESET_ALL)
         else:
             print(
-                logging_config.COLOR_PASS + f"[PASS] - {args.url_live} ({args.url_staging}) - No differences" + logging_config.RESET_ALL)
+                logging_config.COLOR_PASS + f"[PASS] - {args.url_live} ({args.url_dev}) - No differences" + logging_config.RESET_ALL)
     except Exception as e:
         logger.info(f"Error reading diff file: {e}")
 
