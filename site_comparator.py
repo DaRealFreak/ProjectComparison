@@ -47,6 +47,15 @@ class SiteComparator:
 
         if self.user_agent:
             options.add_argument(f"--user-agent={self.user_agent}")
+
+        # Accept self-signed / untrusted certs
+        options.add_argument("--ignore-certificate-errors")
+        options.add_argument("--ignore-ssl-errors=yes")
+        options.add_argument("--allow-insecure-localhost")
+
+        # Selenium capability (works across browsers; for Chrome it complements the flags)
+        options.set_capability("acceptInsecureCerts", True)
+
         options.binary_location = self.chrome_binary
 
         self.driver = webdriver.Chrome(service=service, options=options)
