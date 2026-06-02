@@ -5,8 +5,11 @@ import os
 import shutil
 import subprocess
 import time
+from typing import Optional
 from urllib.parse import urljoin, urlparse, urlunparse, quote
 
+import requests
+import urllib3
 from bs4 import BeautifulSoup
 
 import logging_config
@@ -15,6 +18,28 @@ from image_comparator import ImageComparator
 from site_comparator import SiteComparator
 
 logger = logging.getLogger(__name__)
+
+# urllib3 emits warnings when we probe links over self-signed / untrusted TLS with
+# certificate verification disabled (to match Chrome's --ignore-certificate-errors).
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Content types we treat as crawlable HTML pages.
+HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
+
+# File extensions treated as downloadable / non-HTML assets. Used as a fallback
+# when a server does not return a usable Content-Type for a link.
+DOWNLOADABLE_EXTENSIONS = {
+    # documents
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "rtf", "odt", "ods", "odp",
+    # archives
+    "zip", "rar", "7z", "tar", "gz", "bz2", "xz",
+    # images
+    "jpg", "jpeg", "png", "gif", "svg", "webp", "bmp", "ico", "tiff",
+    # audio / video
+    "mp4", "mp3", "mov", "avi", "wav", "webm", "mkv", "flac", "ogg", "m4a",
+    # binaries / packages
+    "exe", "dmg", "pkg", "msi", "deb", "rpm", "apk",
+}
 
 
 def write_to_file(content: str, filename: str):
@@ -48,6 +73,20 @@ def inject_auth(url: str, username: str, password: str) -> str:
     new_netloc = f"{user_info}@{netloc}"
     new_parsed = parsed._replace(netloc=new_netloc)
     return str(urlunparse(new_parsed))
+
+
+def is_downloadable_file(url: str) -> bool:
+    """
+    Return True if the URL's path points to a known downloadable / non-HTML file,
+    based on its file extension. Used as a fallback when a link's content type
+    cannot be determined.
+
+    :param url:
+    :return:
+    """
+    path = urlparse(url).path
+    ext = os.path.splitext(path)[1].lstrip(".").lower()
+    return ext in DOWNLOADABLE_EXTENSIONS
 
 
 class PageDiffProcessor:
@@ -129,6 +168,45 @@ class PageDiffProcessor:
         if live_url.startswith(live_base):
             return dev_base + live_url[len(live_base):]
         return ''
+
+    def _probe_content_type(self, url: str) -> Optional[str]:
+        """
+        Issue a lightweight HEAD request and return the normalized Content-Type
+        (lower-cased, without parameters), or None if it cannot be determined.
+
+        :param url:
+        :return:
+        """
+        auth = None
+        if self.args.htuser and self.args.htpass:
+            auth = (self.args.htuser, self.args.htpass)
+        try:
+            response = requests.head(url, allow_redirects=True, timeout=10, verify=False, auth=auth)
+        except requests.RequestException as e:
+            logger.debug(f"HEAD request failed for {url}: {e}")
+            return None
+        content_type = response.headers.get("Content-Type", "")
+        if not content_type:
+            return None
+        return content_type.split(";")[0].strip().lower()
+
+    def should_crawl(self, url: str) -> bool:
+        """
+        Decide whether a discovered link should be crawled. Non-HTML resources
+        (PDFs, images, archives, ...) are skipped unless --include-files is set.
+        The content type is determined via a HEAD request, falling back to the
+        file extension when the server does not return a usable Content-Type.
+
+        :param url:
+        :return:
+        """
+        if self.args.include_files:
+            return True
+        content_type = self._probe_content_type(url)
+        if content_type is not None:
+            return content_type in HTML_CONTENT_TYPES
+        # content type unknown — fall back to the extension blocklist.
+        return not is_downloadable_file(url)
 
     def capture_page(self, url: str, label: str, output_dir: str, cookie_file: str = None,
                      capture_screenshots: bool = True):
@@ -284,11 +362,18 @@ class PageDiffProcessor:
         if self.args.recursive and current_level < max_level:
             sub_links = self.extract_internal_links(live_html, live_url)
             for link in sub_links:
-                if link not in visited:
-                    sub_dev = self.get_dev_url(link, live_base, dev_base)
-                    if sub_dev:
-                        self.process_page(link, sub_dev, output_dir, current_level + 1, max_level, live_base,
-                                          dev_base, visited)
+                if link in visited:
+                    continue
+                sub_dev = self.get_dev_url(link, live_base, dev_base)
+                if not sub_dev:
+                    continue
+                if not self.should_crawl(link):
+                    # remember skipped links so they are not probed again on other pages.
+                    visited.add(link)
+                    logger.debug(f"Skipping non-HTML link: {link}")
+                    continue
+                self.process_page(link, sub_dev, output_dir, current_level + 1, max_level, live_base,
+                                  dev_base, visited)
 
 
 def main():
@@ -316,6 +401,9 @@ def main():
     parser.add_argument("--recursive", action="store_true", default=False,
                         help="Enable recursive processing of internal links")
     parser.add_argument("--recursive-max-level", type=int, default=1, help="Maximum recursion level (default: 1)")
+    parser.add_argument("--include-files", action="store_true",
+                        help="Also crawl links to downloadable/non-HTML files (PDFs, images, archives, ...). "
+                             "By default these are skipped during recursive crawling.")
 
     args = parser.parse_args()
     logging_config.setup_logging(args.log_level)

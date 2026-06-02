@@ -19,7 +19,10 @@ automatically — you don't need Chrome or chromedriver installed beforehand.
 - **Full-page screenshots** — optional `fullscreen` capture of the entire scrollable page
   (via the Chrome DevTools Protocol), not just the visible viewport.
 - **Recursive crawling** — optionally follows internal links and compares each discovered
-  page, mapping live URLs to their dev equivalents automatically.
+  page, mapping live URLs to their dev equivalents automatically. Links to downloadable /
+  non-HTML files (PDFs, images, archives, …) are skipped by default — detected via the
+  link's `Content-Type`, falling back to its file extension — and can be re-included with
+  `--include-files`.
 - **Authentication support** — per-environment cookies (JSON) and/or HTTP Basic Auth.
 - **Self-signed / local TLS** — accepts untrusted certificates so local and dev
   environments work without certificate setup.
@@ -83,6 +86,7 @@ python main.py <url_live> <url_dev> [options]
 | `--htpass PASS` | — | HTTP Basic Auth password. |
 | `--recursive` | off | Follow internal links and compare discovered pages. |
 | `--recursive-max-level N` | `1` | Maximum crawl depth when `--recursive` is set. |
+| `--include-files` | off | Also crawl links to downloadable/non-HTML files (PDFs, images, archives, …). By default these are skipped. |
 | `--log-level LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
 
 ## Example run configurations

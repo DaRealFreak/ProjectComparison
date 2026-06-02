@@ -72,6 +72,14 @@ The flow is a single pass orchestrated by `PageDiffProcessor` in `main.py`:
   (`extract_internal_links`, same-domain only). The corresponding dev URL is derived by
   `get_dev_url` via **prefix substitution**: it strips the live base URL prefix and prepends
   the dev base. This assumes live and dev share identical path structures below their roots.
+- **Non-HTML link filtering.** Before recursing into a discovered link, `should_crawl`
+  issues a `HEAD` request and only crawls `text/html` / `application/xhtml+xml` responses;
+  anything else (PDFs, images, archives, …) is skipped. When the `Content-Type` can't be
+  determined (HEAD blocked, timeout, missing header) it falls back to the
+  `DOWNLOADABLE_EXTENSIONS` blocklist via `is_downloadable_file`. `--include-files` bypasses
+  the check. The HEAD probe uses `verify=False` (to match Chrome's cert handling) and
+  reuses `--htuser`/`--htpass`. Skipped links are added to `visited` so they aren't
+  re-probed on other pages.
 - **Output layout.** Each page gets `results/<sanitized-url-path>/` (path `/` → `_`,
   de-duplicated with numeric suffixes). HTML diffs are saved as `html-difference.diff` per
   page; a page is an HTML "fail" when that file is non-empty.
