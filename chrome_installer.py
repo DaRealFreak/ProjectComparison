@@ -74,6 +74,22 @@ class ChromeInstaller:
         zip_path = os.path.join(tmp_dir, 'chromedriver.zip')
         return self._download(expected_path, tmp_dir, url, zip_path)
 
+    def _chrome_exe_relpath(self) -> str:
+        """
+        Returns the Chrome executable path relative to the extracted
+        chrome-<platform> folder. On macOS, Chrome for Testing ships as an .app
+        bundle, so the binary lives several levels deep rather than as a bare file.
+
+        :return:
+        """
+        if self.platform_str.startswith("win"):
+            return 'chrome.exe'
+        if self.platform_str.startswith("mac"):
+            return os.path.join(
+                'Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing'
+            )
+        return 'chrome'
+
     def install_chrome(self) -> str:
         """
         Downloads the chrome binary zip from Chrome for Testing and extracts it
@@ -82,8 +98,7 @@ class ChromeInstaller:
         """
         tmp_dir = os.path.join(self.base_dir, 'tmp', 'chrome')
         os.makedirs(tmp_dir, exist_ok=True)
-        exe_name = 'chrome.exe' if self.platform_str.startswith("win") else 'chrome'
-        expected_path = os.path.join(tmp_dir, f'chrome-{self.platform_str}', exe_name)
+        expected_path = os.path.join(tmp_dir, f'chrome-{self.platform_str}', self._chrome_exe_relpath())
         if os.path.exists(expected_path):
             logger.debug(f"Chrome binary zip already downloaded: {expected_path}")
             return expected_path
