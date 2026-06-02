@@ -51,10 +51,46 @@ class ChromeInstaller:
         with open(zip_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(tmp_dir)
+        ChromeInstaller._extract_zip(zip_path, tmp_dir)
+        # Belt-and-suspenders: make sure the entry-point binary is executable even
+        # if the archive happened to store no unix mode for it.
         os.chmod(expected_path, os.stat(expected_path).st_mode | stat.S_IEXEC)
         return expected_path
+
+    @staticmethod
+    def _extract_zip(zip_path: str, dest_dir: str) -> None:
+        """
+        Extracts a Chrome for Testing zip, preserving the unix permission bits and
+        symlinks stored in the archive.
+
+        ``ZipFile.extractall`` discards the unix mode held in each entry's
+        ``external_attr``, so chrome/chromedriver and all of their helper binaries
+        come out non-executable. On Linux and macOS that makes Chrome exit
+        immediately on launch ("session not created: Chrome instance exited").
+        It also writes symlinks (e.g. the ``Versions/Current`` link inside the
+        macOS ``.app`` bundle) as plain files containing the link target, which
+        breaks the bundle. This restores both.
+
+        :param zip_path:
+        :param dest_dir:
+        :return:
+        """
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            for info in zip_ref.infolist():
+                mode = info.external_attr >> 16
+                target = os.path.join(dest_dir, info.filename)
+                if stat.S_ISLNK(mode):
+                    link_target = zip_ref.read(info).decode('utf-8')
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    if os.path.lexists(target):
+                        os.remove(target)
+                    os.symlink(link_target, target)
+                else:
+                    zip_ref.extract(info, dest_dir)
+                    # Restore the stored permission bits (re-adding the exec bit
+                    # that extractall would have dropped).
+                    if mode:
+                        os.chmod(target, stat.S_IMODE(mode))
 
     def install_chromedriver(self) -> str:
         """
