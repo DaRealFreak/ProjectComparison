@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save runner minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    name: Smoke test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Don't let one OS failing cancel the others -- we want to see every platform.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # Headless Chrome for Testing needs a set of shared libraries that minimal
+      # Linux runners don't all ship. This is the documented Linux setup step --
+      # encoding it here is what keeps the "initial real run" reproducible.
+      - name: Install headless Chrome system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libnss3 libnspr4 libgbm1 libdrm2 libxkbcommon0 \
+            libgtk-3-0 libxshmfence1 libxdamage1 libxfixes3 libxrandr2 \
+            libxcomposite1 libxcursor1 libxi6 libxtst6 libpangocairo-1.0-0 \
+            libcups2 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
+            fonts-liberation
+          # Package was renamed to the *t64 variant on newer Ubuntu (24.04+).
+          sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run end-to-end smoke test
+        run: python tests/smoke_test.py
+
+      # On failure, keep the captured HTML/screenshots so the run is debuggable.
+      - name: Upload results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.os }}
+          path: results/
+          if-no-files-found: ignore
