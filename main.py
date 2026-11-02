@@ -215,6 +215,10 @@ class PageDiffProcessor:
             return dev_base + live_url[len(live_base):]
         return ''
 
+    def credentials_for(self, label: str) -> Optional[tuple]:
+        """Return the (user, password) for the live or dev side, or None."""
+        return getattr(self.args, "side_auth", {}).get(label)
+
     def _probe_content_type(self, url: str) -> Optional[str]:
         """
         Issue a lightweight HEAD request and return the normalized Content-Type
@@ -223,9 +227,8 @@ class PageDiffProcessor:
         :param url:
         :return:
         """
-        auth = None
-        if self.args.htuser is not None and self.args.htpass is not None:
-            auth = (self.args.htuser, self.args.htpass)
+        # Only the live side is crawled.
+        auth = self.credentials_for("live")
         try:
             response = requests.head(url, allow_redirects=True, timeout=10, verify=False, auth=auth)
         except requests.RequestException as e:
@@ -271,8 +274,9 @@ class PageDiffProcessor:
             return self.capture_page_playwright(url, label, output_dir, cookie_file, capture_screenshots)
 
         # inject HTTP Basic Auth credentials if provided.
-        if self.args.htuser is not None and self.args.htpass is not None:
-            url = inject_auth(url, self.args.htuser, self.args.htpass)
+        credentials = self.credentials_for(label)
+        if credentials:
+            url = inject_auth(url, *credentials)
 
         self.site_comparator.driver.get(url)
         if cookie_file:
@@ -312,8 +316,9 @@ class PageDiffProcessor:
             with open(cookie_file, "r", encoding="utf-8") as f:
                 cookies = to_playwright_cookies(json.load(f), url)
         credentials = None
-        if self.args.htuser is not None and self.args.htpass is not None:
-            credentials = {"username": self.args.htuser, "password": self.args.htpass}
+        pair = self.credentials_for(label)
+        if pair:
+            credentials = {"username": pair[0], "password": pair[1]}
 
         result = self.engine.capture(
             url=url,
@@ -683,32 +688,34 @@ def main():
     if args.recursive_max_level is None:
         args.recursive_max_level = 1
     # From here on, no URL carries a password: it would reach logs and baseline files.
-    url_credentials = []
+    # A URL's credentials apply to the side that carried them; --htuser/--htpass apply to both.
     clean_urls = []
+    url_credentials = []
     for url in args.positional_urls:
         clean_url, found = baseline.split_credentials(url)
         clean_urls.append(clean_url)
-        if found:
-            url_credentials.append(found)
+        url_credentials.append(found)
     args.positional_urls = clean_urls
-    if args.urls_file:
-        try:
-            for url in baseline.read_urls_file(args.urls_file):
-                found = baseline.split_credentials(url)[1]
-                if found:
-                    url_credentials.append(found)
-        except baseline.BaselineError as e:
-            parser.error(str(e))
-    if url_credentials:
-        user, password = url_credentials[0]
-        different = any(found != (user, password) for found in url_credentials)
-        if args.htuser is not None and args.htuser != user:
-            different = True
-        if args.htpass is not None and args.htpass != password:
-            different = True
-        if different:
-            parser.error("the URLs and --htuser/--htpass give different credentials; use one set")
-        args.htuser, args.htpass = user, password
+    try:
+        if baseline_dir:
+            # One site and one set of credentials, shared by the stored and the compared side.
+            found_all = {found for found in url_credentials if found}
+            if args.urls_file:
+                for url in baseline.read_urls_file(args.urls_file):
+                    found = baseline.split_credentials(url)[1]
+                    if found:
+                        found_all.add(found)
+            if len(found_all) > 1:
+                parser.error("the URLs give different credentials; use one set")
+            shared = baseline.resolve_credentials(next(iter(found_all), None), args.htuser, args.htpass)
+            args.side_auth = {"live": shared, "dev": shared}
+        else:
+            args.side_auth = {
+                "live": baseline.resolve_credentials(url_credentials[0], args.htuser, args.htpass),
+                "dev": baseline.resolve_credentials(url_credentials[1], args.htuser, args.htpass),
+            }
+    except baseline.BaselineError as e:
+        parser.error(str(e))
     args.url_live = args.positional_urls[0] if args.positional_urls else None
     args.url_dev = args.positional_urls[1] if len(args.positional_urls) > 1 else None
     if args.states and args.engine != "playwright":

@@ -204,7 +204,8 @@ class UrlCredentialsTest(unittest.TestCase):
     def test_split_credentials(self):
         self.assertEqual(baseline.split_credentials(f"https://us%40er:p%3Ass@host:8080/p?q=1#f"),
                          ("https://host:8080/p?q=1#f", ("us@er", "p:ss")))
-        self.assertEqual(baseline.split_credentials("http://user@host/"), ("http://host/", ("user", "")))
+        self.assertEqual(baseline.split_credentials("http://user@host/"), ("http://host/", ("user", None)))
+        self.assertEqual(baseline.split_credentials("http://user:@host/"), ("http://host/", ("user", "")))
         self.assertEqual(baseline.split_credentials("http://host/a@b"), ("http://host/a@b", None))
         self.assertEqual(baseline.split_credentials("http://[::1]:80/"), ("http://[::1]:80/", None))
 
@@ -265,7 +266,6 @@ class UrlCredentialsCommandLineTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             results = os.path.join(temp_dir, "results")
             cases = (
-                [CREDENTIAL_BASE, "http://other:x@127.0.0.1:1/"],
                 [CREDENTIAL_BASE, "http://127.0.0.1:1/", "--htuser", "someone", "--htpass", "else"],
                 [CREDENTIAL_BASE, "http://127.0.0.1:1/", "--htuser", "us@er", "--htpass", "different"],
             )
@@ -285,6 +285,66 @@ class UrlCredentialsCommandLineTest(unittest.TestCase):
             self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
             self.assertIn("different credentials", run.stderr)
             self.assertNotIn(SECRET, run.stdout + run.stderr)
+
+
+class SideCredentialsTest(unittest.TestCase):
+    def test_user_only_url_combines_with_htpass(self):
+        self.assertEqual(baseline.resolve_credentials(("u", None), None, "x"), ("u", "x"))
+        self.assertEqual(baseline.resolve_credentials(("u", None), "u", "x"), ("u", "x"))
+        self.assertIsNone(baseline.resolve_credentials(("u", None), None, None))
+
+    def test_different_value_is_a_conflict(self):
+        with self.assertRaises(baseline.BaselineError):
+            baseline.resolve_credentials(("u", None), "other", "x")
+        with self.assertRaises(baseline.BaselineError):
+            baseline.resolve_credentials(("u", "p"), "u", "x")
+
+    def test_htuser_pair_without_url_credentials(self):
+        self.assertEqual(baseline.resolve_credentials(None, "h", "w"), ("h", "w"))
+        self.assertIsNone(baseline.resolve_credentials(None, "h", None))
+
+    def test_user_only_url_with_htpass_is_accepted_by_cli(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run = subprocess.run(
+                [sys.executable, "main.py", "http://u@127.0.0.1:1/", "http://127.0.0.1:1/", "--htpass", "x",
+                 "--engine", "playwright", "--states", "missing.json", "--output-dir", temp_dir],
+                cwd=REPO_ROOT, capture_output=True, text=True, timeout=60)
+        self.assertNotIn("different credentials", run.stderr)
+
+    def make_processor(self, side_auth, htuser=None, htpass=None):
+        calls = []
+
+        class FakeEngine:
+            def capture(self, **kwargs):
+                calls.append(kwargs)
+                return {"ok": False, "error": "stop", "files": [], "states": []}
+
+        class FakeDriver:
+            def get(self, url):
+                calls.append({"get": url})
+                raise RuntimeError("stop")
+
+        args = SimpleNamespace(resolutions=[(800, 600)], omit_screenshots=True, user_agent=None,
+                               htuser=htuser, htpass=htpass, side_auth=side_auth)
+        site = SimpleNamespace(driver=FakeDriver())
+        engine_processor = PageDiffProcessor(None, ImageComparator(threshold=0), "out", args, FakeEngine(), [])
+        selenium_processor = PageDiffProcessor(site, ImageComparator(threshold=0), "out", args)
+        return engine_processor, selenium_processor, calls
+
+    def test_credentials_apply_only_to_their_own_side(self):
+        side_auth = {"live": ("lu", "lp"), "dev": None}
+        engine_processor, selenium_processor, calls = self.make_processor(side_auth)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine_processor.capture_page("http://l/", "live", temp_dir)
+            engine_processor.capture_page("http://d/", "dev", temp_dir)
+            self.assertEqual(calls[0]["http_credentials"], {"username": "lu", "password": "lp"})
+            self.assertIsNone(calls[1]["http_credentials"])
+            calls.clear()
+            for url, label in (("http://l/", "live"), ("http://d/", "dev")):
+                with self.assertRaises(RuntimeError):
+                    selenium_processor.capture_page(url, label, temp_dir)
+            self.assertEqual(calls[0]["get"], "http://lu:lp@l/")
+            self.assertEqual(calls[1]["get"], "http://d/")
 
 
 class LogRedactionTest(unittest.TestCase):

@@ -63,14 +63,32 @@ def input_mismatches(manifest: dict, engine: str, sizes: list[str], states_sha25
     return problems
 
 
-def split_credentials(url: str) -> tuple[str, Optional[tuple[str, str]]]:
+def split_credentials(url: str) -> tuple[str, Optional[tuple[str, Optional[str]]]]:
     """Return the URL without user:password@ and the decoded (user, password), or None."""
     parts = urlsplit(url)
     userinfo, at, host = parts.netloc.rpartition("@")
     if not at:
         return url, None
-    user, _, password = userinfo.partition(":")
-    return urlunsplit(parts._replace(netloc=host)), (unquote(user), unquote(password))
+    user, colon, password = userinfo.partition(":")
+    # "user@host" gives no password; "user:@host" gives an empty one.
+    return urlunsplit(parts._replace(netloc=host)), (unquote(user), unquote(password) if colon else None)
+
+
+def resolve_credentials(url_credentials: Optional[tuple], htuser: Optional[str],
+                        htpass: Optional[str]) -> Optional[tuple[str, str]]:
+    """Merge the credentials of one URL with --htuser/--htpass; None without a full pair.
+
+    A value that both sources give must be equal.
+    """
+    url_user, url_password = url_credentials if url_credentials else (None, None)
+    for from_url, from_option in ((url_user, htuser), (url_password, htpass)):
+        if from_url is not None and from_option is not None and from_url != from_option:
+            raise BaselineError("the URL and --htuser/--htpass give different credentials; use one set")
+    user = url_user if url_user is not None else htuser
+    password = url_password if url_password is not None else htpass
+    if user is None or password is None:
+        return None
+    return user, password
 
 
 def read_urls_file(path: str) -> list[str]:

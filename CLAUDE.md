@@ -120,8 +120,10 @@ The flow is a single pass orchestrated by `PageDiffProcessor` in `main.py`:
   `https://user:pass@host/...`), URL-encoding credentials and stripping any existing auth.
   `main()` first removes `user:pass@` from every input URL (positional and `--urls`;
   `baseline.split_credentials`) and moves it into `args.htuser`/`args.htpass`, so logs,
-  `baseline.json`, keys and request files only hold the clean URL. Differing credentials
-  exit 2.
+  `baseline.json`, keys and request files only hold the clean URL. URL credentials apply
+  per side (`args.side_auth`, `credentials_for(label)`); `--htuser/--htpass` apply to both.
+  Conflicting values exit 2. `RedactCredentials` (logging_config) also masks `scheme://user:pw@`
+  in every log record, e.g. selenium's DEBUG lines.
 
 ## Playwright engine, states and baselines
 
