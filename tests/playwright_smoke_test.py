@@ -20,6 +20,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 FIXTURES = os.path.join(HERE, "fixtures", "states")
+STATES_FILE = os.path.join(FIXTURES, "states.json")
+WIDTH_FIXTURES = os.path.join(HERE, "fixtures", "widths")
 RESULTS = os.path.join(REPO_ROOT, "results", "playwright")
 RUN_TIMEOUT = 300
 
@@ -50,18 +52,21 @@ class PlaywrightSmokeTest(unittest.TestCase):
             httpd.shutdown()
             httpd.server_close()
 
-    def url(self, fixture):
-        httpd, url = serve(os.path.join(FIXTURES, fixture))
+    def url(self, fixture, fixtures=FIXTURES):
+        httpd, url = serve(os.path.join(fixtures, fixture))
         self.servers.append(httpd)
         return url
 
-    def run_main(self, name, live_fixture, dev_fixture, sizes="800x600", states_file=None):
+    def run_main(self, name, live_fixture, dev_fixture, sizes="800x600", states_file=STATES_FILE,
+                 fixtures=FIXTURES):
         output_dir = os.path.join(RESULTS, name)
         command = [
-            sys.executable, "main.py", self.url(live_fixture), self.url(dev_fixture),
-            "--engine", "playwright", "--states", states_file or os.path.join(FIXTURES, "states.json"),
-            "--output-dir", output_dir, "--remove-previous_results", "--sizes", sizes,
+            sys.executable, "main.py", self.url(live_fixture, fixtures), self.url(dev_fixture, fixtures),
+            "--engine", "playwright", "--output-dir", output_dir, "--remove-previous_results",
+            "--sizes", sizes,
         ]
+        if states_file:
+            command += ["--states", states_file]
         run = subprocess.run(command, cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, encoding="utf-8", errors="replace", timeout=RUN_TIMEOUT)
         print(f"\n$ {' '.join(command)}\n{run.stdout}", flush=True)
@@ -102,6 +107,16 @@ class PlaywrightSmokeTest(unittest.TestCase):
         for name in ("state-wide-only_400x600_live.png", "state-wide-only_1200x800_live.png",
                      "state-wide-only_1200x800_dev.png"):
             self.assertTrue(os.path.exists(os.path.join(page_dir, name)), name)
+
+    def test_width_set_at_load_fails_in_any_size_order(self):
+        # The fixtures differ only in a style that a load-time script enables below 1000 px.
+        for sizes in ("1200x800,400x600", "400x600,1200x800"):
+            with self.subTest(sizes=sizes):
+                run, _ = self.run_main("widths-" + sizes.replace(",", "-"), "live", "dev", sizes,
+                                       states_file=None, fixtures=WIDTH_FIXTURES)
+                self.assertIn("[FAIL]", run.stdout)
+                self.assertIn("Image differences: 400x600p", run.stdout)
+                self.assertNotIn("[PASS]", run.stdout)
 
 
 if __name__ == "__main__":

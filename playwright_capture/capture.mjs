@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const DEFAULT_TIMEOUT_MS = 5000;
-const FALLBACK_SIZE = { width: 1920, height: 1080 };
+// The Selenium path takes its full-page shot at this viewport, too.
+const FULLSCREEN_VIEWPORT = { width: 1920, height: 1080 };
 
 function parseSize(size) {
   const [width, height] = size.split('x').map(Number);
@@ -18,9 +19,13 @@ function describeError(error) {
   return String(error && error.message ? error.message : error).split('\n')[0];
 }
 
-async function loadPage(context, request, size) {
+function viewportFor(sizeName) {
+  return sizeName === 'fullscreen' ? FULLSCREEN_VIEWPORT : parseSize(sizeName);
+}
+
+async function loadPage(context, request, sizeName) {
   const page = await context.newPage();
-  await page.setViewportSize(size);
+  await page.setViewportSize(viewportFor(sizeName));
   const response = await page.goto(request.url, { waitUntil: 'load', timeout: 60000 });
   await page.waitForLoadState('networkidle');
   return { page, response };
@@ -62,7 +67,7 @@ async function captureState(context, request, state, sizeName, timeoutMs) {
   const entry = { id: state.id, size: sizeName, outcome: 'failed', reason: null, files: [] };
   let page = null;
   try {
-    ({ page } = await loadPage(context, request, parseSize(sizeName)));
+    ({ page } = await loadPage(context, request, sizeName));
     if (state.when && (await page.locator(state.when).count()) === 0) {
       entry.outcome = 'absent';
       return entry;
@@ -101,6 +106,34 @@ async function captureState(context, request, state, sizeName, timeoutMs) {
   }
 }
 
+// Each size gets its own page load: scripts that read the width at load time and lazy
+// images must see that viewport, whatever size came before it.
+async function captureBase(context, request, result) {
+  const sizes = request.sizes || [];
+  // The HTML and the status come from the first width.
+  const htmlSize = sizes.find((size) => size !== 'fullscreen') || 'fullscreen';
+  const htmlName = `html_${request.label}.html`;
+  const shotSizes = request.omitScreenshots ? [] : sizes;
+  const loads = shotSizes.includes(htmlSize) ? shotSizes : [htmlSize, ...shotSizes];
+  for (const size of loads) {
+    const { page, response } = await loadPage(context, request, size);
+    try {
+      if (size === htmlSize && !result.files.includes(htmlName)) {
+        result.status = response ? response.status() : null;
+        writeFileSync(join(request.outDir, htmlName), await page.content());
+        result.files.push(htmlName);
+      }
+      if (shotSizes.includes(size)) {
+        const name = `${size}_${request.label}.png`;
+        await page.screenshot({ path: join(request.outDir, name), fullPage: size === 'fullscreen' });
+        result.files.push(name);
+      }
+    } finally {
+      await page.close();
+    }
+  }
+}
+
 async function main() {
   const { values } = parseArgs({ options: { request: { type: 'string' } } });
   if (!values.request) {
@@ -125,31 +158,8 @@ async function main() {
       await context.addCookies(request.cookies);
     }
 
-    const firstSize = requestSizes.find((size) => size !== 'fullscreen');
     try {
-      const { page, response } = await loadPage(
-        context,
-        request,
-        firstSize ? parseSize(firstSize) : FALLBACK_SIZE,
-      );
-      result.status = response ? response.status() : null;
-      const htmlName = `html_${request.label}.html`;
-      writeFileSync(join(request.outDir, htmlName), await page.content());
-      result.files.push(htmlName);
-      if (!request.omitScreenshots) {
-        for (const size of requestSizes) {
-          const name = `${size}_${request.label}.png`;
-          if (size !== 'fullscreen') {
-            await page.setViewportSize(parseSize(size));
-          }
-          await page.screenshot({
-            path: join(request.outDir, name),
-            fullPage: size === 'fullscreen',
-          });
-          result.files.push(name);
-        }
-      }
-      await page.close();
+      await captureBase(context, request, result);
       result.ok = true;
     } catch (error) {
       result.error = describeError(error);

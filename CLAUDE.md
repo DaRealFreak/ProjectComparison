@@ -122,6 +122,9 @@ side and page. The helper writes the same file names as the Selenium path
 (`html_<label>.html`, `<WxH>_<label>.png`, `fullscreen_<label>.png`) plus the state files
 below, and prints one JSON result. Python does all diffing. Cookies are converted from the
 Selenium format; credentials and cookies are never printed or stored in a baseline.
+Every screenshot size is a fresh page load, so the result does not depend on the order of
+`--sizes`; the HTML and the HTTP status come from the first `WxH`, and `fullscreen` is
+taken at a 1920x1080 viewport, as in the Selenium path.
 
 **Pin.** `playwright_capture/package.json` pins `playwright` to
 `1.64.0-alpha-1790635538000`. That is the version the typo3-upgrade skill's DDEV

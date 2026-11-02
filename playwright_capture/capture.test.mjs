@@ -37,6 +37,11 @@ function runCapture(overrides) {
   return { outDir, result: JSON.parse(run.stdout) };
 }
 
+function pngWidth(file) {
+  // The PNG header stores the width as a big-endian integer at byte 16.
+  return readFileSync(file).readUInt32BE(16);
+}
+
 const openBox = (id, extra = {}) => ({
   id,
   when: null,
@@ -52,6 +57,13 @@ test('base capture writes html and one screenshot per size', () => {
   for (const file of result.files) {
     assert.ok(existsSync(join(outDir, file)), file);
   }
+});
+
+test('fullscreen uses a 1920 px viewport whatever size comes before it', () => {
+  const { outDir, result } = runCapture({ sizes: ['400x600', 'fullscreen'] });
+  assert.equal(result.ok, true);
+  assert.equal(pngWidth(join(outDir, '400x600_live.png')), 400);
+  assert.equal(pngWidth(join(outDir, 'fullscreen_live.png')), 1920);
 });
 
 test('state captured writes files per width', () => {
