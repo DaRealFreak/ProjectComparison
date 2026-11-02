@@ -60,7 +60,8 @@ neither. Don't claim to have run a suite you did not run.
   runs `npm ci --prefix playwright_capture` once if `playwright_capture/node_modules/playwright`
   is missing. Browsers are not downloaded by the tool: they must already exist (in DDEV they
   are baked into `PLAYWRIGHT_BROWSERS_PATH`; elsewhere run `npx playwright install chromium`
-  in `playwright_capture/`). A missing Node or a failed `npm ci` exits with code 1.
+  in `playwright_capture/`). A missing or too old Node or a failed `npm ci` exits with
+  code 2.
 
 - **`git` must be on PATH at runtime.** HTML diffing shells out to `git diff --no-index`
   (`main.py`), not a Python diff library.

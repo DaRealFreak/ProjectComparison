@@ -711,8 +711,9 @@ def main():
         try:
             engine.ensure_ready()
         except EngineUnavailable as e:
+            # Exit code 2, like the other refusals: nothing was compared.
             logger.error(str(e))
-            sys.exit(1)
+            sys.exit(2)
     else:
         # Selenium and Chrome are only needed (and imported) for this engine.
         from chrome_installer import ChromeInstaller

@@ -41,7 +41,8 @@ automatically — you don't need Chrome or chromedriver installed beforehand.
   subsequent runs).
 
 - **Only for `--engine playwright`:** **Node.js 20+** and `npm`. On first use the tool runs
-  `npm ci` in `playwright_capture/` itself. Browsers are not downloaded by the tool: run
+  `npm ci` in `playwright_capture/` itself; a missing or too old Node or a failed `npm ci`
+  exits with code 2. Browsers are not downloaded by the tool: run
   `npx playwright install chromium` in `playwright_capture/` (inside the typo3-upgrade DDEV
   layer they are already installed).
 

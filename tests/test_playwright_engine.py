@@ -61,11 +61,20 @@ class EngineReadinessTest(unittest.TestCase):
 
 
 class CommandLineTest(unittest.TestCase):
-    def run_main(self, *args):
+    def run_main(self, *args, env=None):
         return subprocess.run(
             [sys.executable, "main.py", *args], cwd=REPO_ROOT,
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=60, env=env,
         )
+
+    def test_missing_node_exits_2(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # An empty PATH directory hides node on every platform.
+            env = dict(os.environ, PATH=temp_dir)
+            run = self.run_main("http://127.0.0.1:1/", "http://127.0.0.1:1/", "--engine", "playwright",
+                                "--output-dir", os.path.join(temp_dir, "results"), env=env)
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("Node 20 or newer is required", run.stderr)
 
     def test_states_requires_playwright_engine(self):
         run = self.run_main("http://a.example", "http://b.example", "--states", "s.json")
