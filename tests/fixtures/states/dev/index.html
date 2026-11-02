@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>States fixture</title>
+<style>
+  html, body { margin: 0; font-family: sans-serif; }
+  #box { display: none; width: 200px; height: 100px; background: #2d6cdf; }
+  #box.show { display: block; }
+</style>
+</head>
+<body>
+<button id="open" onclick="document.getElementById('box').classList.add('show')">Open</button>
+<div id="box">Box content</div>
+<button id="wide-only">Wide only</button>
+</body>
+</html>
