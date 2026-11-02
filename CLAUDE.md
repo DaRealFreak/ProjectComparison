@@ -178,6 +178,8 @@ the baseline but not in the run, or the reverse, is a `[FAIL]`, as is a missing 
 Both modes refuse (exit 2) an empty `--urls` list or a URL outside the base URL, and a
 capture refuses an existing `baseline.json` unless `--remove-previous_results` is given.
 `main.py` runs these checks before the engine starts and before `DIR/pages/` is cleared.
+A capture exits 1 when a page failed to load or a state failed (`[FAIL] <key>: state <id>
+<size> failed: <reason>`); `baseline.json` is still written.
 
 `--list-capabilities` prints `{"engines": ["selenium", "playwright"], "states": 1, "baseline": 1}`
 and exits; other tools use it to detect support.

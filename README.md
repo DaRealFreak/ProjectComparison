@@ -242,6 +242,10 @@ a URL that is not below the base URL. A capture refuses when `DIR` already holds
 baseline; add `--remove-previous_results` to replace it. These checks run before anything
 in `DIR` is deleted.
 
+A capture **exits with code 1** when a page failed to load or a state failed
+(`[FAIL] <page>: state <id> <size> failed: <reason>`). The baseline is still written, so a
+later comparison reports the same failure.
+
 ## Output
 
 Each compared page gets its own subfolder under the output directory, named after the URL

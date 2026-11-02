@@ -114,8 +114,11 @@ def _fail(message: str) -> None:
 
 
 def capture_baseline(processor, baseline_dir: str, base_url: str, urls: list[str],
-                     states_file: Optional[str], cookie_file: Optional[str], replace: bool = False) -> dict:
-    """Capture every page of urls (from run_urls) once, labelled live, and write baseline.json."""
+                     states_file: Optional[str], cookie_file: Optional[str], replace: bool = False) -> int:
+    """Capture every page of urls (from run_urls) once, labelled live, and write baseline.json.
+
+    Return the number of pages and states that failed.
+    """
     check_capture_target(baseline_dir, replace)
     pages_dir = os.path.join(baseline_dir, PAGES_DIR)
     # An old capture would otherwise mix with the new one.
@@ -123,6 +126,7 @@ def capture_baseline(processor, baseline_dir: str, base_url: str, urls: list[str
     os.makedirs(pages_dir, exist_ok=True)
 
     pages = {}
+    failures = 0
     for url in urls:
         key = page_key(url, base_url)
         page_dir = processor.unique_output_dir(pages_dir, processor.sanitize_path(url))
@@ -135,7 +139,13 @@ def capture_baseline(processor, baseline_dir: str, base_url: str, urls: list[str
             "status": info["status"], "files": info["files"], "states": info["states"],
         }
         if not info["ok"]:
+            failures += 1
             _fail(f"[FAIL] {key}: page failed to load: {info['error']}")
+        for state in info["states"]:
+            if state.get("outcome") == "failed":
+                failures += 1
+                _fail(f"[FAIL] {key}: state {state['id']} {state['size']} failed: "
+                      f"{state.get('reason') or 'unknown reason'}")
 
     manifest = {
         "version": MANIFEST_VERSION,
@@ -151,7 +161,7 @@ def capture_baseline(processor, baseline_dir: str, base_url: str, urls: list[str
     }
     write_baseline_manifest(baseline_dir, manifest)
     logger.info(f"Baseline of {len(pages)} page(s) written to {baseline_dir}")
-    return manifest
+    return failures
 
 
 def _stored_file_names(page: dict) -> list[str]:

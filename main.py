@@ -538,8 +538,11 @@ class PageDiffProcessor:
 def run_baseline_mode(parser, args, processor, manifest, urls):
     try:
         if args.capture_baseline:
-            baseline.capture_baseline(processor, args.capture_baseline, args.url_live, urls,
-                                      args.states, args.dev_cookies, args.remove_previous_results)
+            failures = baseline.capture_baseline(processor, args.capture_baseline, args.url_live, urls,
+                                                 args.states, args.dev_cookies, args.remove_previous_results)
+            if failures:
+                # The baseline is still written, so a later compare reports the same failures.
+                sys.exit(1)
         else:
             baseline.compare_baseline(processor, args.compare_baseline, manifest, args.url_live,
                                       urls, args.dev_cookies)

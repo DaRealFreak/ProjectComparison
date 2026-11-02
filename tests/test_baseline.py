@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the baseline manifest, input checks and the baseline command line."""
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -92,6 +94,30 @@ class ManifestTest(unittest.TestCase):
                 text = handle.read()
         self.assertNotIn("s3cret", text)
         self.assertIsNotNone(json.loads(text)["cookiesSha256"])
+
+    def test_failed_state_at_capture_is_reported_and_counted(self):
+        states = [
+            {"id": "menu", "size": "800x600", "outcome": "captured", "reason": None, "files": []},
+            {"id": "menu", "size": "400x600", "outcome": "failed", "reason": "step 1: boom", "files": []},
+            {"id": "gone", "size": "800x600", "outcome": "absent", "reason": None, "files": []},
+        ]
+
+        def capture_page(**kwargs):
+            return "", {}, {"ok": True, "error": None, "status": 200, "files": [], "states": states}
+
+        processor = SimpleNamespace(
+            args=SimpleNamespace(engine="playwright", omit_screenshots=True, user_agent=None),
+            size_names=lambda: ["800x600"], capture_page=capture_page,
+            unique_output_dir=PageDiffProcessor.unique_output_dir,
+            sanitize_path=PageDiffProcessor.sanitize_path)
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as temp_dir, contextlib.redirect_stdout(output):
+            failures = baseline.capture_baseline(processor, os.path.join(temp_dir, "base"), "http://a.example/",
+                                                 ["http://a.example/"], None, None)
+        self.assertIn("[FAIL] /: state menu 400x600 failed: step 1: boom", output.getvalue())
+        self.assertNotIn("state menu 800x600", output.getvalue())
+        self.assertNotIn("state gone", output.getvalue())
+        self.assertEqual(failures, 1)
 
 
 class CommandLineTest(unittest.TestCase):

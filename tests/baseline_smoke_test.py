@@ -108,9 +108,18 @@ class BaselineSmokeTest(unittest.TestCase):
         run = self.run_main("short", "--compare-baseline", self.baseline_dir, self.base)
         self.assertIn("[FAIL] /index.html: missing in run", run.stdout)
 
+    def test_failed_state_fails_the_capture(self):
+        self.serve_fixture("dev-broken")
+        run = self.run_main("capture-broken", "--capture-baseline", self.baseline_dir, self.base)
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("[FAIL] /: state box-open 800x600 failed: step 2:", run.stdout)
+        self.assertTrue(os.path.isfile(os.path.join(self.baseline_dir, "baseline.json")))
+
     def test_baseline_page_that_failed_to_load_is_a_failure(self):
         # Port 1 refuses connections, so the stored page records a failed load.
-        self.run_main("unreachable", "--capture-baseline", self.baseline_dir, "http://127.0.0.1:1/")
+        run = self.run_main("unreachable", "--capture-baseline", self.baseline_dir, "http://127.0.0.1:1/")
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("[FAIL] /: page failed to load", run.stdout)
         run = self.run_main("failed", "--compare-baseline", self.baseline_dir, "http://127.0.0.1:1/")
         self.assertIn("[FAIL] /: baseline page failed to load", run.stdout)
         self.assertNotIn("[PASS]", run.stdout)
