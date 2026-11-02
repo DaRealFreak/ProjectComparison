@@ -124,7 +124,9 @@ below, and prints one JSON result. Python does all diffing. Cookies are converte
 Selenium format; credentials and cookies are never printed or stored in a baseline.
 Every screenshot size is a fresh page load, so the result does not depend on the order of
 `--sizes`; the HTML and the HTTP status come from the first `WxH`, and `fullscreen` is
-taken at a 1920x1080 viewport, as in the Selenium path.
+taken at a 1920x1080 viewport, as in the Selenium path. Each load (base size or state and
+width) runs in a new browser context with the same cookies, credentials and user agent,
+so cookies and storage that one load sets do not reach the next.
 
 **Pin.** `playwright_capture/package.json` pins `playwright` to
 `1.64.0-alpha-1790635538000`. That is the version the typo3-upgrade skill's DDEV

@@ -201,7 +201,8 @@ python main.py https://www.example.com https://dev.example.com --engine playwrig
 - Actions: `click`, `hover`, `focus`, `waitFor` (need `selector`, optional `index`, default
   0), `press` (needs `key`), `wait` (needs `ms`, 1 to 10000).
 
-Every state is captured at every width on a fresh page load, on both sides. Each one has one
+Every state is captured at every width on a fresh page load in a new browser context, on both
+sides, so cookies or storage set by the steps of one state do not change the next. Each one has one
 outcome per side: `absent` (`when` matched nothing), `captured`, or `failed` (a step failed
 or timed out). Rules:
 

@@ -23,12 +23,35 @@ function viewportFor(sizeName) {
   return sizeName === 'fullscreen' ? FULLSCREEN_VIEWPORT : parseSize(sizeName);
 }
 
-async function loadPage(context, request, sizeName) {
-  const page = await context.newPage();
-  await page.setViewportSize(viewportFor(sizeName));
-  const response = await page.goto(request.url, { waitUntil: 'load', timeout: 60000 });
-  await page.waitForLoadState('networkidle');
-  return { page, response };
+async function openContext(browser, request) {
+  const options = { ignoreHTTPSErrors: true };
+  if (request.httpCredentials) {
+    options.httpCredentials = request.httpCredentials;
+  }
+  if (request.userAgent) {
+    options.userAgent = request.userAgent;
+  }
+  const context = await browser.newContext(options);
+  if (request.cookies && request.cookies.length > 0) {
+    await context.addCookies(request.cookies);
+  }
+  return context;
+}
+
+// Every load gets a new context, so cookies and storage that one load sets (for example
+// by a consent click) do not change the next one. The caller closes the context.
+async function loadPage(browser, request, sizeName) {
+  const context = await openContext(browser, request);
+  try {
+    const page = await context.newPage();
+    await page.setViewportSize(viewportFor(sizeName));
+    const response = await page.goto(request.url, { waitUntil: 'load', timeout: 60000 });
+    await page.waitForLoadState('networkidle');
+    return { context, page, response };
+  } catch (error) {
+    await context.close();
+    throw error;
+  }
 }
 
 async function runStep(page, step, timeoutMs) {
@@ -63,11 +86,12 @@ function widthsForState(state, requestSizes) {
   return wanted.filter((size) => size !== 'fullscreen');
 }
 
-async function captureState(context, request, state, sizeName, timeoutMs) {
+async function captureState(browser, request, state, sizeName, timeoutMs) {
   const entry = { id: state.id, size: sizeName, outcome: 'failed', reason: null, files: [] };
-  let page = null;
+  let context = null;
   try {
-    ({ page } = await loadPage(context, request, sizeName));
+    let page;
+    ({ context, page } = await loadPage(browser, request, sizeName));
     if (state.when && (await page.locator(state.when).count()) === 0) {
       entry.outcome = 'absent';
       return entry;
@@ -100,15 +124,15 @@ async function captureState(context, request, state, sizeName, timeoutMs) {
     entry.reason = describeError(error);
     return entry;
   } finally {
-    if (page) {
-      await page.close();
+    if (context) {
+      await context.close();
     }
   }
 }
 
 // Each size gets its own page load: scripts that read the width at load time and lazy
 // images must see that viewport, whatever size came before it.
-async function captureBase(context, request, result) {
+async function captureBase(browser, request, result) {
   const sizes = request.sizes || [];
   // The HTML and the status come from the first width.
   const htmlSize = sizes.find((size) => size !== 'fullscreen') || 'fullscreen';
@@ -116,7 +140,7 @@ async function captureBase(context, request, result) {
   const shotSizes = request.omitScreenshots ? [] : sizes;
   const loads = shotSizes.includes(htmlSize) ? shotSizes : [htmlSize, ...shotSizes];
   for (const size of loads) {
-    const { page, response } = await loadPage(context, request, size);
+    const { context, page, response } = await loadPage(browser, request, size);
     try {
       if (size === htmlSize && !result.files.includes(htmlName)) {
         result.status = response ? response.status() : null;
@@ -129,7 +153,7 @@ async function captureBase(context, request, result) {
         result.files.push(name);
       }
     } finally {
-      await page.close();
+      await context.close();
     }
   }
 }
@@ -146,20 +170,8 @@ async function main() {
 
   const browser = await chromium.launch();
   try {
-    const contextOptions = { ignoreHTTPSErrors: true };
-    if (request.httpCredentials) {
-      contextOptions.httpCredentials = request.httpCredentials;
-    }
-    if (request.userAgent) {
-      contextOptions.userAgent = request.userAgent;
-    }
-    const context = await browser.newContext(contextOptions);
-    if (request.cookies && request.cookies.length > 0) {
-      await context.addCookies(request.cookies);
-    }
-
     try {
-      await captureBase(context, request, result);
+      await captureBase(browser, request, result);
       result.ok = true;
     } catch (error) {
       result.error = describeError(error);
@@ -178,7 +190,7 @@ async function main() {
           });
           continue;
         }
-        result.states.push(await captureState(context, request, state, sizeName, timeoutMs));
+        result.states.push(await captureState(browser, request, state, sizeName, timeoutMs));
       }
     }
   } finally {

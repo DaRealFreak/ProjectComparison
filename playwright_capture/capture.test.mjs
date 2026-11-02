@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureUrl = pathToFileURL(join(here, '..', 'tests', 'fixtures', 'states', 'page.html')).href;
+const consentUrl = pathToFileURL(join(here, '..', 'tests', 'fixtures', 'states', 'consent.html')).href;
 
 if (!existsSync(join(here, 'node_modules', 'playwright'))) {
   throw new Error('run "npm ci" in playwright_capture first');
@@ -111,5 +112,24 @@ test('trigger absent is absent', () => {
   assert.equal(result.states.length, 2);
   for (const entry of result.states) {
     assert.equal(entry.outcome, 'absent');
+  }
+});
+
+test('storage set by a step does not reach the next load', () => {
+  const { result } = runCapture({
+    url: consentUrl,
+    sizes: ['400x600', '1200x800'],
+    states: [
+      {
+        id: 'accept',
+        when: '#banner',
+        steps: [{ action: 'click', selector: '#accept', index: 0 }],
+        sizes: null,
+      },
+    ],
+  });
+  assert.equal(result.states.length, 2);
+  for (const entry of result.states) {
+    assert.equal(entry.outcome, 'captured', `${entry.size}: ${entry.outcome}`);
   }
 });
