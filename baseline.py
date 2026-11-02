@@ -40,8 +40,8 @@ def read_baseline_manifest(dir: str) -> dict:
     return manifest
 
 
-def input_mismatches(manifest: dict, engine: str, sizes: list[str],
-                     states_sha256: Optional[str], omit_screenshots: bool = False) -> list[str]:
+def input_mismatches(manifest: dict, engine: str, sizes: list[str], states_sha256: Optional[str],
+                     omit_screenshots: bool = False, user_agent: Optional[str] = None) -> list[str]:
     """Name each run input that differs from the stored baseline."""
     problems = []
     if manifest.get("engine") != engine:
@@ -55,6 +55,10 @@ def input_mismatches(manifest: dict, engine: str, sizes: list[str],
         stored = "without" if manifest.get("omitScreenshots") else "with"
         problems.append(f"screenshots: baseline {stored} screenshots, run "
                         f"{'without' if omit_screenshots else 'with'}")
+    # Sites can serve other markup to another user agent.
+    if manifest.get("userAgent") != user_agent:
+        problems.append(f"user agent: baseline {manifest.get('userAgent') or 'default'}, "
+                        f"run {user_agent or 'default'}")
     return problems
 
 
@@ -111,6 +115,11 @@ def check_capture_target(baseline_dir: str, replace: bool) -> None:
 def _fail(message: str) -> None:
     logger.info(message)
     print(logging_config.COLOR_FAIL + message + logging_config.RESET_ALL)
+
+
+def _warn(message: str) -> None:
+    logger.warning(message)
+    print(logging_config.COLOR_WARN + message + logging_config.RESET_ALL)
 
 
 def capture_baseline(processor, baseline_dir: str, base_url: str, urls: list[str],
@@ -174,6 +183,11 @@ def _stored_file_names(page: dict) -> list[str]:
 def compare_baseline(processor, baseline_dir: str, manifest: dict, dev_base_url: str,
                      urls: list[str], cookie_file: Optional[str]) -> None:
     """Capture the dev side of urls (from run_urls) and compare it with the stored live files."""
+    # Other cookies can be on purpose (a new session), so this only warns.
+    run_cookies = file_sha256(cookie_file) if cookie_file else None
+    if manifest.get("cookiesSha256") != run_cookies:
+        _warn("[WARN] cookies differ from the baseline")
+
     run_keys = {}
     for url in urls:
         run_keys[page_key(url, dev_base_url)] = url

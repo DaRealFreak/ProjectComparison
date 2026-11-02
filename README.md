@@ -240,7 +240,9 @@ skipped. Pages are matched by their path below the base URL. The baseline direct
 `baseline.json` (engine, sizes, SHA-256 of the state file and cookie file, screenshot mode,
 and per page the files and state outcomes; no cookie values) and `pages/<page>/` with the
 stored files. The comparison **refuses to run (exit code 2)** when the engine, the sizes,
-the state file or the screenshot mode (`--omit-screenshots`) differ from the baseline. A page
+the state file, the screenshot mode (`--omit-screenshots`) or the user agent (`--user-agent`)
+differ from the baseline. A different cookie file only prints `[WARN] cookies differ from the
+baseline` and the comparison continues. A page
 missing on either side, a baseline page that failed to load, and a missing stored file are
 reported as `[FAIL]`. Use `--dev-cookies` for cookies in the baseline modes.
 

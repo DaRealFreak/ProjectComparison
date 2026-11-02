@@ -50,6 +50,22 @@ class ManifestTest(unittest.TestCase):
         self.assertTrue(problems[0].startswith("screenshots"))
         self.assertEqual(input_mismatches(MANIFEST, "playwright", ["800x600"], "abc", False), [])
 
+    def test_user_agent_mismatch_refused(self):
+        problems = input_mismatches(MANIFEST, "playwright", ["800x600"], "abc", False, "Bot/1")
+        self.assertEqual(problems, ["user agent: baseline default, run Bot/1"])
+        self.assertEqual(input_mismatches(MANIFEST, "playwright", ["800x600"], "abc", False, None), [])
+
+    def test_user_agent_mismatch_refused_by_cli(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            write_baseline_manifest(temp_dir, dict(MANIFEST, statesSha256=None))
+            run = subprocess.run(
+                [sys.executable, "main.py", "--compare-baseline", temp_dir, "http://127.0.0.1:1/",
+                 "--engine", "playwright", "--sizes", "800x600", "--user-agent", "Bot/1",
+                 "--output-dir", os.path.join(temp_dir, "results")],
+                cwd=REPO_ROOT, capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("user agent: baseline default, run Bot/1", run.stderr)
+
     def test_screenshot_mode_mismatch_refused_by_cli(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             write_baseline_manifest(temp_dir, dict(MANIFEST, statesSha256=None))
@@ -154,6 +170,11 @@ class CompareBaselineTest(unittest.TestCase):
         output = self.compare(200, 404)
         self.assertIn("[FAIL] /: status 200 on live, 404 on dev", output)
         self.assertNotIn("[PASS]", output)
+
+    def test_different_cookies_warn_once_and_continue(self):
+        output = self.compare(200, 200, cookie_text="[]")
+        self.assertEqual(output.count("[WARN] cookies differ from the baseline"), 1)
+        self.assertIn("[PASS]", output)
 
     def test_same_status_passes(self):
         output = self.compare(200, 200)

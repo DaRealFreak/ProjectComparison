@@ -179,8 +179,10 @@ stored files. `baseline.json` (version 1) holds `baseUrl`, `engine`, `sizes`,
 `omitScreenshots`, `statesSha256`, `cookiesSha256`, `userAgent`, `createdAt` and per-page
 `url`, `dir`, `ok`, `error`, `status`, `files`, `states`. Pages are keyed by their path
 below the base URL, so the base URL may differ between capture and compare. A compare
-**refuses and exits 2** when engine, sizes, the sha256 of the state file or the screenshot
-mode (`--omit-screenshots`) differ ("the run differs from the baseline: ..."). A page in
+**refuses and exits 2** when engine, sizes, the sha256 of the state file, the screenshot
+mode (`--omit-screenshots`) or the user agent differ ("the run differs from the baseline:
+..."). A different `cookiesSha256` only prints `[WARN] cookies differ from the baseline`
+and continues. A page in
 the baseline but not in the run, or the reverse, is a `[FAIL]`, as is a missing stored file.
 Both modes refuse (exit 2) an empty `--urls` list or a URL outside the base URL, and a
 capture refuses an existing `baseline.json` unless `--remove-previous_results` is given.
