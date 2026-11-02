@@ -202,14 +202,14 @@ def compare_baseline(processor, baseline_dir: str, manifest: dict, dev_base_url:
                 name = "fullscreen" if isinstance(res, str) else f"{res[0]}x{res[1]}"
                 stored_screenshots["fullscreen" if isinstance(res, str) else res] = os.path.join(
                     page_dir, f"{name}_{STORED_LABEL}.png")
-        live_info = {"ok": True, "error": None, "states": page["states"]}
+        live_info = {"ok": True, "error": None, "status": page.get("status"), "states": page["states"]}
 
         logger.info(f"Comparing page: {url}")
         dev_capture = processor.capture_page(
             url=url, label="dev", output_dir=page_dir, cookie_file=cookie_file,
             capture_screenshots=not processor.args.omit_screenshots)
         processor.compare_captures(page["url"], url, page_dir,
-                                   (stored_html, stored_screenshots, live_info), dev_capture)
+                                   (stored_html, stored_screenshots, live_info), dev_capture, key)
 
     for key in manifest["pages"]:
         if key not in run_keys:

@@ -424,15 +424,34 @@ class PageDiffProcessor:
         )
 
         self.compare_captures(live_url, dev_url, sub_output_dir, (live_html, live_screenshots, live_info),
-                              (dev_html, dev_screenshots, dev_info))
+                              (dev_html, dev_screenshots, dev_info), baseline.page_key(live_url, live_base))
         self.crawl_links(live_info["ok"], live_html, live_url, current_level, max_level, live_base,
                          dev_base, output_dir, visited)
 
+    @staticmethod
+    def compare_status(page_path: str, live_status: Optional[int], dev_status: Optional[int]) -> bool:
+        """
+        Logs a [FAIL] line when the HTTP status differs and returns True; the Selenium
+        engine has no status, so both sides are None there.
+        """
+        if live_status != dev_status:
+            fail_msg = f"[FAIL] {page_path}: status {live_status} on live, {dev_status} on dev"
+            logger.info(fail_msg)
+            print(logging_config.COLOR_FAIL + fail_msg + logging_config.RESET_ALL)
+            return True
+        # Error pages are compared on purpose, so the same error status only warns.
+        if live_status is not None and live_status >= 400:
+            warn_msg = f"[WARN] {page_path}: status {live_status} on both sides"
+            logger.warning(warn_msg)
+            print(logging_config.COLOR_WARN + warn_msg + logging_config.RESET_ALL)
+        return False
+
     def compare_captures(self, live_url: str, dev_url: str, sub_output_dir: str, live_capture: tuple,
-                         dev_capture: tuple):
+                         dev_capture: tuple, page_path: str):
         """
         Compares two captured sides of one page and logs the [PASS] / [FAIL] line.
-        Each capture is the (html, screenshot paths, info) tuple of capture_page.
+        Each capture is the (html, screenshot paths, info) tuple of capture_page;
+        page_path is the path below the base URL, used in the status lines.
         """
         live_html, live_screenshots, live_info = live_capture
         dev_html, dev_screenshots, dev_info = dev_capture
@@ -448,6 +467,8 @@ class PageDiffProcessor:
             logger.info(fail_msg)
             print(logging_config.COLOR_FAIL + fail_msg + logging_config.RESET_ALL)
             return
+
+        status_fail = self.compare_status(page_path, live_info.get("status"), dev_info.get("status"))
 
         # write HTML to files
         live_html_file = os.path.join(sub_output_dir, "html_live.html")
@@ -496,8 +517,10 @@ class PageDiffProcessor:
 
         # log summary for this page
         html_fail = os.path.getsize(html_diff_file) > 0
-        if html_fail or image_diffs or state_diffs or state_failures:
+        if status_fail or html_fail or image_diffs or state_diffs or state_failures:
             fail_msg = f"[FAIL] - {live_url} ({dev_url})"
+            if status_fail:
+                fail_msg += " - HTTP status differs"
             if html_fail:
                 fail_msg += " - HTML differences found"
             if image_diffs:

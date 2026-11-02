@@ -173,6 +173,12 @@ without a download. Keep the two in step.
 python main.py https://www.example.com https://dev.example.com --engine playwright
 ```
 
+The Playwright engine also compares the HTTP status of each page. A different status is
+`[FAIL] <path>: status <live> on live, <dev> on dev`. The same status of 400 or more on both
+sides prints `[WARN] <path>: status <n> on both sides`, and the page is still compared (error
+pages are compared on purpose). `<path>` is the path below the base URL. In a baseline
+comparison the stored status is the live side.
+
 ### Interaction states
 
 `--states states.json` also captures pages after interactions. Format (version 1):

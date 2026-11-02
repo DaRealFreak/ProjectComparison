@@ -85,6 +85,28 @@ class BaselineSmokeTest(unittest.TestCase):
         self.capture("--remove-previous_results")
         self.assertTrue(os.path.isfile(os.path.join(self.baseline_dir, "baseline.json")))
 
+    def write_urls(self, *pages):
+        urls_file = os.path.join(self.temp.name, "urls.txt")
+        with open(urls_file, "w", encoding="utf-8") as handle:
+            for page in pages:
+                handle.write(f"{self.base}{page}\n")
+        return urls_file
+
+    def test_status_change_fails(self):
+        urls_file = self.write_urls("index.html")
+        self.capture("--urls", urls_file)
+        os.remove(os.path.join(self.site, "index.html"))
+        run = self.run_main("status", "--compare-baseline", self.baseline_dir, self.base, "--urls", urls_file)
+        self.assertIn("[FAIL] /index.html: status 200 on live, 404 on dev", run.stdout)
+        self.assertNotIn("[PASS]", run.stdout)
+
+    def test_same_error_status_warns(self):
+        urls_file = self.write_urls("missing.html")
+        self.capture("--urls", urls_file)
+        run = self.run_main("missing", "--compare-baseline", self.baseline_dir, self.base, "--urls", urls_file)
+        self.assertIn("[WARN] /missing.html: status 404 on both sides", run.stdout)
+        self.assertIn("[PASS]", run.stdout)
+
     def test_changed_state_fails(self):
         self.capture()
         self.serve_fixture("dev-broken")

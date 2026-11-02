@@ -15,6 +15,7 @@ sys.path.insert(0, REPO_ROOT)
 
 import baseline  # noqa: E402
 from baseline import input_mismatches, read_baseline_manifest, write_baseline_manifest  # noqa: E402
+from image_comparator import ImageComparator  # noqa: E402
 from main import PageDiffProcessor  # noqa: E402
 
 MANIFEST = {
@@ -118,6 +119,46 @@ class ManifestTest(unittest.TestCase):
         self.assertNotIn("state menu 800x600", output.getvalue())
         self.assertNotIn("state gone", output.getvalue())
         self.assertEqual(failures, 1)
+
+
+class CompareBaselineTest(unittest.TestCase):
+    def compare(self, stored_status, dev_status, manifest_fields=None, cookie_text=None):
+        """Compare one stored page with a fake dev capture; return what was printed."""
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            baseline_dir = os.path.join(temp_dir, "base")
+            stored_dir = os.path.join(baseline_dir, "pages", "index")
+            os.makedirs(stored_dir)
+            with open(os.path.join(stored_dir, "html_live.html"), "w", encoding="utf-8") as handle:
+                handle.write("<p>same</p>")
+            page = {"url": "http://a.example/", "dir": "index", "ok": True, "error": None,
+                    "status": stored_status, "files": ["html_live.html"], "states": []}
+            manifest = dict(MANIFEST, pages={"/": page}, **(manifest_fields or {}))
+            cookie_file = None
+            if cookie_text is not None:
+                cookie_file = os.path.join(temp_dir, "cookies.json")
+                with open(cookie_file, "w", encoding="utf-8") as handle:
+                    handle.write(cookie_text)
+            results = os.path.join(temp_dir, "results")
+            os.makedirs(results)
+            args = SimpleNamespace(resolutions=[], omit_screenshots=True, threshold=0, always_generate_diff=False)
+            processor = PageDiffProcessor(None, ImageComparator(threshold=0), results, args)
+            processor.capture_page = lambda **kwargs: (
+                "<p>same</p>", {}, {"ok": True, "error": None, "status": dev_status, "files": [], "states": []})
+            with contextlib.redirect_stdout(output):
+                baseline.compare_baseline(processor, baseline_dir, manifest, "http://b.example/",
+                                          ["http://b.example/"], cookie_file)
+        return output.getvalue()
+
+    def test_status_is_compared_with_the_stored_page(self):
+        output = self.compare(200, 404)
+        self.assertIn("[FAIL] /: status 200 on live, 404 on dev", output)
+        self.assertNotIn("[PASS]", output)
+
+    def test_same_status_passes(self):
+        output = self.compare(200, 200)
+        self.assertIn("[PASS]", output)
+        self.assertNotIn("[FAIL]", output)
 
 
 class CommandLineTest(unittest.TestCase):

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Tests for the Playwright engine wrapper and the state comparison table."""
+import contextlib
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -16,6 +19,8 @@ from playwright_engine import (  # noqa: E402
     EngineUnavailable, PlaywrightEngine, compare_state_outcomes, expected_state_entries,
     states_without_widths, to_playwright_cookies,
 )
+from image_comparator import ImageComparator  # noqa: E402
+from main import PageDiffProcessor  # noqa: E402
 from states import State, Step  # noqa: E402
 
 
@@ -144,6 +149,48 @@ class CompareOutcomesTest(unittest.TestCase):
         expected = [("b", "800x600"), ("a", "800x600")]
         rows = compare_state_outcomes(expected, [], [])
         self.assertEqual([(r[0], r[1]) for r in rows], expected)
+
+
+def make_processor(output_dir, states=None, omit_screenshots=True):
+    args = SimpleNamespace(resolutions=[], omit_screenshots=omit_screenshots, threshold=0,
+                           always_generate_diff=False)
+    return PageDiffProcessor(None, ImageComparator(threshold=0), output_dir, args, states=states)
+
+
+class StatusCompareTest(unittest.TestCase):
+    def compare(self, live_info, dev_info):
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as temp_dir, contextlib.redirect_stdout(output):
+            make_processor(temp_dir).compare_captures(
+                "http://live/x", "http://dev/x", temp_dir, ("<p>same</p>", {}, live_info),
+                ("<p>same</p>", {}, dev_info), "/x")
+        return output.getvalue()
+
+    @staticmethod
+    def info(status):
+        return {"ok": True, "error": None, "status": status, "states": []}
+
+    def test_different_status_fails(self):
+        output = self.compare(self.info(200), self.info(404))
+        self.assertIn("[FAIL] /x: status 200 on live, 404 on dev", output)
+        self.assertNotIn("[PASS]", output)
+
+    def test_same_error_status_warns_and_compares(self):
+        output = self.compare(self.info(404), self.info(404))
+        self.assertIn("[WARN] /x: status 404 on both sides", output)
+        self.assertIn("[PASS]", output)
+
+    def test_same_success_status_passes_without_warning(self):
+        output = self.compare(self.info(200), self.info(200))
+        self.assertNotIn("[WARN]", output)
+        self.assertIn("[PASS]", output)
+
+    def test_capture_without_status_passes(self):
+        # The Selenium engine reports no status.
+        selenium_info = {"ok": True, "error": None, "states": []}
+        output = self.compare(selenium_info, selenium_info)
+        self.assertNotIn("status", output)
+        self.assertIn("[PASS]", output)
 
 
 class ExpectedEntriesTest(unittest.TestCase):

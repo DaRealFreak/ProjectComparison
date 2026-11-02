@@ -4,6 +4,7 @@ from colorama import init, Fore, Style
 
 COLOR_PASS = Fore.GREEN
 COLOR_FAIL = Fore.RED
+COLOR_WARN = Fore.YELLOW
 RESET_ALL = Style.RESET_ALL
 
 
