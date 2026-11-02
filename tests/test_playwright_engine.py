@@ -70,7 +70,7 @@ class CommandLineTest(unittest.TestCase):
     def test_list_capabilities(self):
         run = self.run_main("--list-capabilities")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(json.loads(run.stdout), {"engines": ["selenium", "playwright"], "states": 1})
+        self.assertEqual(json.loads(run.stdout), {"engines": ["selenium", "playwright"], "states": 1, "baseline": 1})
 
     def test_urls_are_required_without_list_capabilities(self):
         run = self.run_main()

@@ -14,16 +14,17 @@ import requests
 import urllib3
 from bs4 import BeautifulSoup
 
+import baseline
 import logging_config
 from image_comparator import ImageComparator
 from playwright_engine import (
     EngineUnavailable, PlaywrightEngine, compare_state_outcomes, expected_state_entries,
     to_playwright_cookies,
 )
-from states import StateFileError, load_states
+from states import StateFileError, file_sha256, load_states
 
 # Printed by --list-capabilities so callers can detect supported features.
-CAPABILITIES = {"engines": ["selenium", "playwright"], "states": 1}
+CAPABILITIES = {"engines": ["selenium", "playwright"], "states": 1, "baseline": 1}
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,14 @@ def is_downloadable_file(url: str) -> bool:
     path = urlparse(url).path
     ext = os.path.splitext(path)[1].lstrip(".").lower()
     return ext in DOWNLOADABLE_EXTENSIONS
+
+
+def size_names(resolutions: list) -> list:
+    """Return resolutions in the helper's text form, e.g. 1920x1080 or fullscreen."""
+    names = []
+    for res in resolutions:
+        names.append("fullscreen" if isinstance(res, str) else f"{res[0]}x{res[1]}")
+    return names
 
 
 class PageDiffProcessor:
@@ -293,6 +302,7 @@ class PageDiffProcessor:
             omit_screenshots=not capture_screenshots,
         )
         info = {"ok": result.get("ok", False), "error": result.get("error"),
+                "status": result.get("status"), "files": result.get("files", []),
                 "states": result.get("states", [])}
         if not info["ok"]:
             return "", {}, info
@@ -311,10 +321,7 @@ class PageDiffProcessor:
 
     def size_names(self) -> list:
         """Return the run sizes in the helper's text form."""
-        names = []
-        for res in self.args.resolutions:
-            names.append("fullscreen" if isinstance(res, str) else f"{res[0]}x{res[1]}")
-        return names
+        return size_names(self.args.resolutions)
 
     def compare_states(self, live_info: dict, dev_info: dict, output_dir: str):
         """
@@ -393,9 +400,6 @@ class PageDiffProcessor:
 
         visited.add(live_url)
 
-        # initialize local image differences for this page
-        image_diffs = []
-
         # create a unique output folder
         safe_dir = self.sanitize_path(live_url)
         sub_output_dir = self.unique_output_dir(output_dir, safe_dir)
@@ -419,6 +423,21 @@ class PageDiffProcessor:
             capture_screenshots=not self.args.omit_screenshots
         )
 
+        self.compare_captures(live_url, dev_url, sub_output_dir, (live_html, live_screenshots, live_info),
+                              (dev_html, dev_screenshots, dev_info))
+        self.crawl_links(live_info["ok"], live_html, live_url, current_level, max_level, live_base,
+                         dev_base, output_dir, visited)
+
+    def compare_captures(self, live_url: str, dev_url: str, sub_output_dir: str, live_capture: tuple,
+                         dev_capture: tuple):
+        """
+        Compares two captured sides of one page and logs the [PASS] / [FAIL] line.
+        Each capture is the (html, screenshot paths, info) tuple of capture_page.
+        """
+        live_html, live_screenshots, live_info = live_capture
+        dev_html, dev_screenshots, dev_info = dev_capture
+        image_diffs = []
+
         # a page that did not load cannot be compared
         load_errors = []
         for side, info in (("live", live_info), ("dev", dev_info)):
@@ -428,8 +447,6 @@ class PageDiffProcessor:
             fail_msg = f"[FAIL] - {live_url} ({dev_url}) - " + "; ".join(load_errors)
             logger.info(fail_msg)
             print(logging_config.COLOR_FAIL + fail_msg + logging_config.RESET_ALL)
-            self.crawl_links(live_info["ok"], live_html, live_url, current_level, max_level, live_base,
-                             dev_base, output_dir, visited)
             return
 
         # write HTML to files
@@ -496,9 +513,6 @@ class PageDiffProcessor:
             logger.info(pass_msg)
             print(logging_config.COLOR_PASS + pass_msg + logging_config.RESET_ALL)
 
-        self.crawl_links(True, live_html, live_url, current_level, max_level, live_base, dev_base,
-                         output_dir, visited)
-
     def crawl_links(self, live_loaded: bool, live_html: str, live_url: str, current_level: int,
                     max_level: int, live_base: str, dev_base: str, output_dir: str, visited: set):
         """
@@ -521,12 +535,24 @@ class PageDiffProcessor:
                                   dev_base, visited)
 
 
+def run_baseline_mode(parser, args, processor, manifest):
+    try:
+        if args.capture_baseline:
+            baseline.capture_baseline(processor, args.capture_baseline, args.url_live, args.urls_file,
+                                      args.states, args.dev_cookies)
+        else:
+            baseline.compare_baseline(processor, args.compare_baseline, manifest, args.url_live,
+                                      args.urls_file, args.dev_cookies)
+    except baseline.BaselineError as e:
+        parser.error(str(e))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate HTML and screenshot diffs between two URLs (and optionally recursively), saving results in a structured folder."
     )
-    parser.add_argument("url_live", nargs="?", help="Live URL")
-    parser.add_argument("url_dev", nargs="?", help="Dev URL")
+    parser.add_argument("positional_urls", nargs="*", metavar="url",
+                        help="Live and dev URL; with --capture-baseline or --compare-baseline one URL")
     parser.add_argument("--output-dir", default="results", help="Output directory (default: results)")
     parser.add_argument('--remove-previous_results', action='store_true', help="Remove previous results before running")
     parser.add_argument("--version", default="latest", help="Chrome for Testing version (default: latest)")
@@ -544,6 +570,14 @@ def main():
     parser.add_argument("--engine", default="selenium", choices=["selenium", "playwright"],
                         help="Capture engine (default: selenium)")
     parser.add_argument("--states", help="JSON file with interaction states to capture (needs --engine playwright)")
+    parser.add_argument("--capture-baseline", metavar="DIR",
+                        help="Capture one URL (or every URL of --urls) into DIR as a baseline "
+                             "(needs --engine playwright)")
+    parser.add_argument("--compare-baseline", metavar="DIR",
+                        help="Compare a URL (or every URL of --urls) against the baseline in DIR "
+                             "(needs --engine playwright)")
+    parser.add_argument("--urls", dest="urls_file", metavar="FILE",
+                        help="File with one URL per line for the baseline modes; # starts a comment")
     parser.add_argument("--list-capabilities", action="store_true",
                         help="Print the supported engines and features as JSON and exit")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -559,8 +593,23 @@ def main():
     if args.list_capabilities:
         print(json.dumps(CAPABILITIES))
         return
-    if not args.url_live or not args.url_dev:
-        parser.error("url_live and url_dev are required")
+    baseline_dir = args.capture_baseline or args.compare_baseline
+    if args.capture_baseline and args.compare_baseline:
+        parser.error("use either --capture-baseline or --compare-baseline")
+    if baseline_dir:
+        if len(args.positional_urls) != 1:
+            parser.error("the baseline modes need exactly one URL")
+        if args.engine != "playwright":
+            parser.error("the baseline modes need --engine playwright")
+        if args.live_cookies:
+            parser.error("the baseline modes use --dev-cookies only")
+    else:
+        if len(args.positional_urls) != 2:
+            parser.error("url_live and url_dev are required")
+        if args.urls_file:
+            parser.error("--urls needs --capture-baseline or --compare-baseline")
+    args.url_live = args.positional_urls[0] if args.positional_urls else None
+    args.url_dev = args.positional_urls[1] if len(args.positional_urls) > 1 else None
     if args.states and args.engine != "playwright":
         parser.error("--states needs --engine playwright")
     states = []
@@ -572,10 +621,11 @@ def main():
     logging_config.setup_logging(args.log_level)
 
     output_dir = args.output_dir
-    if args.remove_previous_results and os.path.exists(output_dir):
-        logger.info(f"Removing previous results in {output_dir}...")
-        shutil.rmtree(output_dir)
-    os.makedirs(output_dir, exist_ok=True)
+    if not args.capture_baseline:
+        if args.remove_previous_results and os.path.exists(output_dir):
+            logger.info(f"Removing previous results in {output_dir}...")
+            shutil.rmtree(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
 
     # parse resolutions. if --sizes is not supplied, default to 1920x1080.
     resolutions = []
@@ -593,6 +643,18 @@ def main():
     else:
         resolutions = [(1920, 1080)]
     args.resolutions = resolutions
+
+    manifest = None
+    if args.compare_baseline:
+        try:
+            manifest = baseline.read_baseline_manifest(args.compare_baseline)
+        except baseline.BaselineError as e:
+            parser.error(str(e))
+        mismatches = baseline.input_mismatches(
+            manifest, args.engine, size_names(resolutions),
+            file_sha256(args.states) if args.states else None)
+        if mismatches:
+            parser.error("the run differs from the baseline: " + "; ".join(mismatches))
 
     site_comparator = None
     engine = None
@@ -617,6 +679,10 @@ def main():
     image_comparator = ImageComparator(threshold=args.threshold)
 
     processor = PageDiffProcessor(site_comparator, image_comparator, output_dir, args, engine, states)
+
+    if baseline_dir:
+        run_baseline_mode(parser, args, processor, manifest)
+        return
 
     logger.info("Processing base page...")
     processor.process_page(args.url_live, args.url_dev, output_dir, 0, args.recursive_max_level,
