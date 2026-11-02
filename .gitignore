@@ -5,3 +5,4 @@ __pycache__/
 results/
 tmp/
 *.diff
+playwright_capture/node_modules/
