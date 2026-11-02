@@ -107,6 +107,19 @@ class CommandLineTest(unittest.TestCase):
         self.assertEqual(run.returncode, 2)
         self.assertIn("--states needs --engine playwright", run.stderr)
 
+    def test_options_may_sit_between_the_urls(self):
+        run = self.run_main("http://a.example", "--sizes", "800x600", "http://b.example", "--states", "s.json")
+        self.assertEqual(run.returncode, 2)
+        self.assertNotIn("unrecognized arguments", run.stderr)
+        self.assertIn("--states needs --engine playwright", run.stderr)
+
+    def test_options_between_urls_keep_the_baseline_url_count_check(self):
+        run = self.run_main("--capture-baseline", "x", "--engine", "playwright", "http://a.example",
+                            "--sizes", "800x600", "http://b.example")
+        self.assertEqual(run.returncode, 2)
+        self.assertNotIn("unrecognized arguments", run.stderr)
+        self.assertIn("the baseline modes need exactly one URL", run.stderr)
+
     def test_list_capabilities(self):
         run = self.run_main("--list-capabilities")
         self.assertEqual(run.returncode, 0, run.stderr)

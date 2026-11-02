@@ -658,7 +658,7 @@ def main():
                         help="Also crawl links to downloadable/non-HTML files (PDFs, images, archives, ...). "
                              "By default these are skipped during recursive crawling.")
 
-    args = parser.parse_args()
+    args = parser.parse_intermixed_args()
     if args.list_capabilities:
         print(json.dumps(CAPABILITIES))
         return
