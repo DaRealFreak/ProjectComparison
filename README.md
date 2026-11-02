@@ -81,7 +81,7 @@ python main.py <url_live> <url_dev> [options]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--output-dir DIR` | `results` | Directory where results are written. |
-| `--remove-previous_results` | off | Delete the output directory before running. |
+| `--remove-previous_results` | off | Delete the output directory before running. With `--capture-baseline`: replace an existing baseline. |
 | `--version VER` | `latest` | Chrome for Testing version to download (e.g. `131.0.6778.85`). |
 | `--sizes LIST` | `1920x1080` | Comma-separated resolutions, e.g. `1024x640,1920x1080,fullscreen`. |
 | `--threshold N` | `0` | Average per-pixel difference above which a screenshot is considered a failure. |
@@ -236,6 +236,11 @@ stored files. The comparison **refuses to run (exit code 2)** when the engine, t
 the state file or the screenshot mode (`--omit-screenshots`) differ from the baseline. A page
 missing on either side, a baseline page that failed to load, and a missing stored file are
 reported as `[FAIL]`. Use `--dev-cookies` for cookies in the baseline modes.
+
+Both modes also **refuse to run (exit code 2)** when the `--urls` file lists no URL or lists
+a URL that is not below the base URL. A capture refuses when `DIR` already holds a
+baseline; add `--remove-previous_results` to replace it. These checks run before anything
+in `DIR` is deleted.
 
 ## Output
 

@@ -175,6 +175,9 @@ below the base URL, so the base URL may differ between capture and compare. A co
 **refuses and exits 2** when engine, sizes, the sha256 of the state file or the screenshot
 mode (`--omit-screenshots`) differ ("the run differs from the baseline: ..."). A page in
 the baseline but not in the run, or the reverse, is a `[FAIL]`, as is a missing stored file.
+Both modes refuse (exit 2) an empty `--urls` list or a URL outside the base URL, and a
+capture refuses an existing `baseline.json` unless `--remove-previous_results` is given.
+`main.py` runs these checks before the engine starts and before `DIR/pages/` is cleared.
 
 `--list-capabilities` prints `{"engines": ["selenium", "playwright"], "states": 1, "baseline": 1}`
 and exits; other tools use it to detect support.
@@ -185,5 +188,6 @@ and exits; other tools use it to detect support.
   `fullscreen`. Internally resolutions are `(w, h)` tuples or the string `"fullscreen"` —
   preserve this dual representation when touching screenshot/diff code.
 - The clean-output flag is spelled `--remove-previous_results` (mixed dash/underscore,
-  unlike the other flags) and deletes the entire `--output-dir` before running.
+  unlike the other flags) and deletes the entire `--output-dir` before running. With
+  `--capture-baseline` it instead allows replacing an existing baseline in `DIR`.
 - `results/`, `tmp/`, `__pycache__/`, and `*.diff` are gitignored.

@@ -85,8 +85,27 @@ def url_for_key(key: str, base_url: str) -> str:
     return base_url.rstrip("/") + key
 
 
-def _run_urls(base_url: str, urls_file: Optional[str]) -> list[str]:
-    return read_urls_file(urls_file) if urls_file else [base_url]
+def run_urls(base_url: str, urls_file: Optional[str]) -> list[str]:
+    """Return the pages of a baseline run; refuse an empty list and URLs outside the base URL."""
+    if not urls_file:
+        return [base_url]
+    urls = read_urls_file(urls_file)
+    if not urls:
+        raise BaselineError(f"{urls_file} lists no URL")
+    for url in urls:
+        page_key(url, base_url)
+    return urls
+
+
+def check_capture_target(baseline_dir: str, replace: bool) -> None:
+    """Refuse a directory that is not a baseline, and an existing baseline unless replace is set."""
+    if not os.path.exists(baseline_dir):
+        return
+    if not os.path.isfile(os.path.join(baseline_dir, MANIFEST_NAME)):
+        raise BaselineError(f"{baseline_dir} exists and is not a baseline directory")
+    if not replace:
+        raise BaselineError(f"{baseline_dir} already holds a baseline; "
+                            f"add --remove-previous_results to replace it")
 
 
 def _fail(message: str) -> None:
@@ -94,19 +113,17 @@ def _fail(message: str) -> None:
     print(logging_config.COLOR_FAIL + message + logging_config.RESET_ALL)
 
 
-def capture_baseline(processor, baseline_dir: str, base_url: str, urls_file: Optional[str],
-                     states_file: Optional[str], cookie_file: Optional[str]) -> dict:
-    """Capture every page once, labelled live, and write baseline.json."""
-    if os.path.exists(baseline_dir):
-        if not os.path.isfile(os.path.join(baseline_dir, MANIFEST_NAME)):
-            raise BaselineError(f"{baseline_dir} exists and is not a baseline directory")
-        # An old capture would otherwise mix with the new one.
-        shutil.rmtree(os.path.join(baseline_dir, PAGES_DIR), ignore_errors=True)
+def capture_baseline(processor, baseline_dir: str, base_url: str, urls: list[str],
+                     states_file: Optional[str], cookie_file: Optional[str], replace: bool = False) -> dict:
+    """Capture every page of urls (from run_urls) once, labelled live, and write baseline.json."""
+    check_capture_target(baseline_dir, replace)
     pages_dir = os.path.join(baseline_dir, PAGES_DIR)
+    # An old capture would otherwise mix with the new one.
+    shutil.rmtree(pages_dir, ignore_errors=True)
     os.makedirs(pages_dir, exist_ok=True)
 
     pages = {}
-    for url in _run_urls(base_url, urls_file):
+    for url in urls:
         key = page_key(url, base_url)
         page_dir = processor.unique_output_dir(pages_dir, processor.sanitize_path(url))
         logger.info(f"Capturing baseline page: {url}")
@@ -145,10 +162,10 @@ def _stored_file_names(page: dict) -> list[str]:
 
 
 def compare_baseline(processor, baseline_dir: str, manifest: dict, dev_base_url: str,
-                     urls_file: Optional[str], cookie_file: Optional[str]) -> None:
-    """Capture the dev side and compare it with the stored live files."""
+                     urls: list[str], cookie_file: Optional[str]) -> None:
+    """Capture the dev side of urls (from run_urls) and compare it with the stored live files."""
     run_keys = {}
-    for url in _run_urls(dev_base_url, urls_file):
+    for url in urls:
         run_keys[page_key(url, dev_base_url)] = url
 
     for key, url in run_keys.items():

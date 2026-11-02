@@ -77,6 +77,14 @@ class BaselineSmokeTest(unittest.TestCase):
         self.assertIn("[PASS]", run.stdout)
         self.assertNotIn("[FAIL]", run.stdout)
 
+    def test_recapture_needs_remove_previous_results(self):
+        self.capture()
+        run = self.run_main("recapture", "--capture-baseline", self.baseline_dir, self.base)
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("already holds a baseline", run.stdout)
+        self.capture("--remove-previous_results")
+        self.assertTrue(os.path.isfile(os.path.join(self.baseline_dir, "baseline.json")))
+
     def test_changed_state_fails(self):
         self.capture()
         self.serve_fixture("dev-broken")

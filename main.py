@@ -535,14 +535,14 @@ class PageDiffProcessor:
                                   dev_base, visited)
 
 
-def run_baseline_mode(parser, args, processor, manifest):
+def run_baseline_mode(parser, args, processor, manifest, urls):
     try:
         if args.capture_baseline:
-            baseline.capture_baseline(processor, args.capture_baseline, args.url_live, args.urls_file,
-                                      args.states, args.dev_cookies)
+            baseline.capture_baseline(processor, args.capture_baseline, args.url_live, urls,
+                                      args.states, args.dev_cookies, args.remove_previous_results)
         else:
             baseline.compare_baseline(processor, args.compare_baseline, manifest, args.url_live,
-                                      args.urls_file, args.dev_cookies)
+                                      urls, args.dev_cookies)
     except baseline.BaselineError as e:
         parser.error(str(e))
 
@@ -554,7 +554,9 @@ def main():
     parser.add_argument("positional_urls", nargs="*", metavar="url",
                         help="Live and dev URL; with --capture-baseline or --compare-baseline one URL")
     parser.add_argument("--output-dir", default="results", help="Output directory (default: results)")
-    parser.add_argument('--remove-previous_results', action='store_true', help="Remove previous results before running")
+    parser.add_argument('--remove-previous_results', action='store_true',
+                        help="Remove previous results before running; with --capture-baseline, replace "
+                             "an existing baseline")
     parser.add_argument("--version", default="latest", help="Chrome for Testing version (default: latest)")
     parser.add_argument("--sizes",
                         help="Comma-separated list of resolutions (e.g., 1024x640,1920x1080,fullscreen)")
@@ -645,11 +647,18 @@ def main():
     args.resolutions = resolutions
 
     manifest = None
-    if args.compare_baseline:
+    baseline_urls = []
+    if baseline_dir:
+        # Refuse bad input before the engine starts and before a stored baseline is touched.
         try:
-            manifest = baseline.read_baseline_manifest(args.compare_baseline)
+            baseline_urls = baseline.run_urls(args.url_live, args.urls_file)
+            if args.capture_baseline:
+                baseline.check_capture_target(args.capture_baseline, args.remove_previous_results)
+            else:
+                manifest = baseline.read_baseline_manifest(args.compare_baseline)
         except baseline.BaselineError as e:
             parser.error(str(e))
+    if args.compare_baseline:
         mismatches = baseline.input_mismatches(
             manifest, args.engine, size_names(resolutions),
             file_sha256(args.states) if args.states else None, args.omit_screenshots)
@@ -681,7 +690,7 @@ def main():
     processor = PageDiffProcessor(site_comparator, image_comparator, output_dir, args, engine, states)
 
     if baseline_dir:
-        run_baseline_mode(parser, args, processor, manifest)
+        run_baseline_mode(parser, args, processor, manifest, baseline_urls)
         return
 
     logger.info("Processing base page...")

@@ -86,7 +86,8 @@ class ManifestTest(unittest.TestCase):
                 unique_output_dir=PageDiffProcessor.unique_output_dir,
                 sanitize_path=PageDiffProcessor.sanitize_path)
             target = os.path.join(temp_dir, "base")
-            baseline.capture_baseline(processor, target, "http://a.example/", None, None, cookie_file)
+            baseline.capture_baseline(processor, target, "http://a.example/", ["http://a.example/"], None,
+                                      cookie_file)
             with open(os.path.join(target, "baseline.json"), encoding="utf-8") as handle:
                 text = handle.read()
         self.assertNotIn("s3cret", text)
@@ -108,6 +109,57 @@ class CommandLineTest(unittest.TestCase):
         self.assertEqual(run.returncode, 2)
         run = self.run_main("--capture-baseline", "x", "--engine", "playwright", "http://a", "http://b")
         self.assertEqual(run.returncode, 2)
+
+    def make_baseline(self, temp_dir):
+        target = os.path.join(temp_dir, "base")
+        write_baseline_manifest(target, dict(MANIFEST, statesSha256=None))
+        stored = os.path.join(target, "pages", "index", "html_live.html")
+        os.makedirs(os.path.dirname(stored))
+        with open(stored, "w", encoding="utf-8") as handle:
+            handle.write("<p>stored</p>")
+        return target, stored
+
+    def write_urls(self, temp_dir, text):
+        urls_file = os.path.join(temp_dir, "urls.txt")
+        with open(urls_file, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        return urls_file
+
+    def test_existing_baseline_is_refused_without_remove_previous_results(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target, stored = self.make_baseline(temp_dir)
+            run = self.run_main("--capture-baseline", target, "http://127.0.0.1:1/", "--engine", "playwright")
+            self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+            self.assertIn("already holds a baseline", run.stderr)
+            self.assertIn("--remove-previous_results", run.stderr)
+            self.assertTrue(os.path.isfile(stored))
+
+    def test_url_outside_base_is_refused_before_anything_is_deleted(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target, stored = self.make_baseline(temp_dir)
+            urls_file = self.write_urls(temp_dir, "http://127.0.0.1:1/\nhttp://other.example/x\n")
+            run = self.run_main("--capture-baseline", target, "http://127.0.0.1:1/", "--engine", "playwright",
+                                "--urls", urls_file, "--remove-previous_results")
+            self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+            self.assertIn("http://other.example/x is not below http://127.0.0.1:1/", run.stderr)
+            self.assertTrue(os.path.isfile(stored))
+
+    def test_empty_url_file_is_refused_in_both_modes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            urls_file = self.write_urls(temp_dir, "# nothing to check\n\n")
+            new_target = os.path.join(temp_dir, "new")
+            run = self.run_main("--capture-baseline", new_target, "http://127.0.0.1:1/", "--engine", "playwright",
+                                "--urls", urls_file)
+            self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+            self.assertIn("lists no URL", run.stderr)
+            self.assertFalse(os.path.exists(new_target))
+
+            target, _ = self.make_baseline(temp_dir)
+            run = self.run_main("--compare-baseline", target, "http://127.0.0.1:1/", "--engine", "playwright",
+                                "--sizes", "800x600", "--urls", urls_file,
+                                "--output-dir", os.path.join(temp_dir, "results"))
+            self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+            self.assertIn("lists no URL", run.stderr)
 
     def test_page_key_follows_prefix_rule(self):
         self.assertEqual(baseline.page_key("http://h/", "http://h/"), "/")
