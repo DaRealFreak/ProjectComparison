@@ -60,6 +60,32 @@ class EngineReadinessTest(unittest.TestCase):
         self.assertEqual(calls[1][:2], ["npm", "ci"])
 
 
+class RequestPathsTest(unittest.TestCase):
+    def test_paths_handed_to_the_helper_are_absolute(self):
+        seen = {}
+
+        def run_helper(self, request_path):
+            seen["request_path"] = request_path
+            with open(request_path, encoding="utf-8") as handle:
+                seen["request"] = json.load(handle)
+            return {"ok": True}
+
+        engine = PlaywrightEngine(REPO_ROOT)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            previous = os.getcwd()
+            os.chdir(temp_dir)
+            try:
+                os.makedirs("results")
+                with mock.patch.object(PlaywrightEngine, "_run_helper", run_helper):
+                    engine.capture("http://a.example/", "live", "results", ["800x600"], [], [], None, None, True)
+            finally:
+                os.chdir(previous)
+            self.assertTrue(os.path.isabs(seen["request_path"]), seen["request_path"])
+            self.assertTrue(os.path.isabs(seen["request"]["outDir"]), seen["request"]["outDir"])
+            self.assertEqual(os.path.realpath(seen["request"]["outDir"]),
+                             os.path.realpath(os.path.join(temp_dir, "results")))
+
+
 class CommandLineTest(unittest.TestCase):
     def run_main(self, *args, env=None):
         return subprocess.run(

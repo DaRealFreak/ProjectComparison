@@ -50,6 +50,8 @@ class PlaywrightEngine:
     def capture(self, url: str, label: str, out_dir: str, sizes: list[str], states: list[State],
                 cookies: list[dict], http_credentials: Optional[dict], user_agent: Optional[str],
                 omit_screenshots: bool) -> dict:
+        # The helper runs in the tool directory, so a relative path would point to the wrong place.
+        out_dir = os.path.abspath(out_dir)
         request = {
             "url": url, "label": label, "outDir": out_dir, "sizes": sizes,
             "states": states_to_json(states), "cookies": cookies,
