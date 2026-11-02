@@ -62,3 +62,58 @@ jobs:
           name: results-${{ matrix.os }}
           path: results/
           if-no-files-found: ignore
+
+  # The Playwright engine needs Node, the pinned playwright package and a Chromium build.
+  # Linux only: the matrix job above already covers the Python code on every OS.
+  playwright:
+    name: Playwright engine (ubuntu-latest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install the capture helper
+        working-directory: playwright_capture
+        run: npm ci
+
+      - name: Install Chromium and its system libraries
+        working-directory: playwright_capture
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Python dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+
+      - name: Run helper tests
+        working-directory: playwright_capture
+        run: node --test
+
+      - name: Run Python tests
+        run: .venv/bin/python -m unittest tests.test_states tests.test_playwright_engine tests.test_baseline -v
+
+      - name: Run Playwright smoke test
+        run: .venv/bin/python tests/playwright_smoke_test.py
+
+      - name: Run baseline smoke test
+        run: .venv/bin/python tests/baseline_smoke_test.py
+
+      # On failure, keep the captured files so the run is debuggable.
+      - name: Upload results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-playwright
+          path: results/
+          if-no-files-found: ignore

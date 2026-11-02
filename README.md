@@ -28,6 +28,9 @@ automatically — you don't need Chrome or chromedriver installed beforehand.
   environments work without certificate setup.
 - **Auto-managed browser** — downloads and caches the correct Chrome + chromedriver for
   your platform.
+- **Playwright engine, interaction states and baselines** — optionally capture with
+  Playwright, also capture states such as an open menu, and compare a site against a stored
+  baseline when the original installation is gone (see below).
 - **Pass/Fail reporting** — color-coded `[PASS]`/`[FAIL]` summary per page and overall.
 
 ## Requirements
@@ -36,6 +39,11 @@ automatically — you don't need Chrome or chromedriver installed beforehand.
 - **`git`** available on your `PATH` — HTML diffing uses `git diff --no-index`.
 - **Internet access on first run** — to download Chrome for Testing into `tmp/` (cached for
   subsequent runs).
+
+- **Only for `--engine playwright`:** **Node.js 20+** and `npm`. On first use the tool runs
+  `npm ci` in `playwright_capture/` itself. Browsers are not downloaded by the tool: run
+  `npx playwright install chromium` in `playwright_capture/` (inside the typo3-upgrade DDEV
+  layer they are already installed).
 
 > **Platform support:** Works out of the box on **Windows**, **Linux**, and **macOS**
 > (Intel and Apple Silicon). On Linux, headless Chrome may additionally require system
@@ -87,6 +95,12 @@ python main.py <url_live> <url_dev> [options]
 | `--recursive` | off | Follow internal links and compare discovered pages. |
 | `--recursive-max-level N` | `1` | Maximum crawl depth when `--recursive` is set. |
 | `--include-files` | off | Also crawl links to downloadable/non-HTML files (PDFs, images, archives, …). By default these are skipped. |
+| `--engine ENGINE` | `selenium` | `selenium` or `playwright`. |
+| `--states FILE` | — | JSON file with interaction states (needs `--engine playwright`). |
+| `--capture-baseline DIR` | — | Capture one URL (or every URL of `--urls`) into `DIR` as a baseline (needs `--engine playwright`). |
+| `--compare-baseline DIR` | — | Compare a URL (or every URL of `--urls`) against the baseline in `DIR` (needs `--engine playwright`). |
+| `--urls FILE` | — | One URL per line for the baseline modes; `#` starts a comment. |
+| `--list-capabilities` | off | Print the supported engines and features as JSON and exit. |
 | `--log-level LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
 
 ## Example run configurations
@@ -147,6 +161,81 @@ python main.py https://www.example.com https://dev.example.com \
   --version 131.0.6778.85 --output-dir results/run-2026-06-02 --log-level DEBUG
 ```
 
+## Playwright engine, interaction states and baselines
+
+`--engine playwright` captures with [Playwright](https://playwright.dev) instead of
+Selenium. It writes the same files and uses the same pass/fail rules. The Node helper in
+`playwright_capture/` pins `playwright` to `1.64.0-alpha-1790635538000`, the version the
+typo3-upgrade skill bakes into its DDEV container, so the browsers installed there match
+without a download. Keep the two in step.
+
+```bash
+python main.py https://www.example.com https://dev.example.com --engine playwright
+```
+
+### Interaction states
+
+`--states states.json` also captures pages after interactions. Format (version 1):
+
+```json
+{
+  "version": 1,
+  "states": [
+    {
+      "id": "menu-open",
+      "when": ".nav-toggle",
+      "sizes": ["375x667"],
+      "steps": [
+        {"action": "click", "selector": ".nav-toggle"},
+        {"action": "waitFor", "selector": ".nav.open"}
+      ]
+    }
+  ]
+}
+```
+
+- `id` — lowercase letters, digits and `-`; unique. `steps` — at least one.
+- `when` (optional) — CSS selector; the state is captured only if it matches an element.
+- `sizes` (optional) — list of `WxH`; default is the run's `--sizes`. `fullscreen` is
+  never used for states.
+- Actions: `click`, `hover`, `focus`, `waitFor` (need `selector`, optional `index`, default
+  0), `press` (needs `key`), `wait` (needs `ms`, 1 to 10000).
+
+Every state is captured at every width on a fresh page load, on both sides. Each one has one
+outcome per side: `absent` (`when` matched nothing), `captured`, or `failed` (a step failed
+or timed out). Rules:
+
+| Live | Dev | Result |
+|------|-----|--------|
+| `captured` | `captured` | HTML and screenshot are diffed |
+| `absent` | `absent` | not applicable (only logged) |
+| anything else, including a missing capture | | `[FAIL] state <id> <size>: ...` |
+
+### Baselines
+
+A baseline stores one capture so you can compare against it after the original
+installation is gone (for example before and after an upgrade):
+
+```bash
+# Before the change: capture the current site
+python main.py --capture-baseline baselines/site https://www.example.com \
+  --engine playwright --sizes 375x667,1920x1080 --states states.json --urls urls.txt
+
+# After the change: compare the new site against it
+python main.py --compare-baseline baselines/site https://dev.example.com \
+  --engine playwright --sizes 375x667,1920x1080 --states states.json --urls urls.txt
+```
+
+Both modes need `--engine playwright` and exactly one URL (the base URL). `--urls FILE`
+lists more pages, one per line, each below the base URL; blank lines and `#` comments are
+skipped. Pages are matched by their path below the base URL. The baseline directory holds
+`baseline.json` (engine, sizes, SHA-256 of the state file and cookie file, screenshot mode,
+and per page the files and state outcomes; no cookie values) and `pages/<page>/` with the
+stored files. The comparison **refuses to run (exit code 2)** when the engine, the sizes,
+the state file or the screenshot mode (`--omit-screenshots`) differ from the baseline. A page
+missing on either side, a baseline page that failed to load, and a missing stored file are
+reported as `[FAIL]`. Use `--dev-cookies` for cookies in the baseline modes.
+
 ## Output
 
 Each compared page gets its own subfolder under the output directory, named after the URL
@@ -166,6 +255,11 @@ results/
     ├── fullscreen_dev.png
     └── fullscreen_screenshot_diff.png
 ```
+
+With `--states`, each captured state adds `state-<id>_<WxH>_html_live.html`,
+`state-<id>_<WxH>_html_dev.html`, `state-<id>_<WxH>_live.png`, `state-<id>_<WxH>_dev.png`
+and, when they differ, `state-<id>_<WxH>_html-difference.diff` and
+`state-<id>_<WxH>_screenshot_diff.png`.
 
 A page is reported as **`[FAIL]`** when the HTML diff is non-empty **or** any screenshot's
 average pixel difference exceeds `--threshold`; otherwise it's **`[PASS]`**.
