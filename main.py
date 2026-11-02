@@ -652,7 +652,7 @@ def main():
             parser.error(str(e))
         mismatches = baseline.input_mismatches(
             manifest, args.engine, size_names(resolutions),
-            file_sha256(args.states) if args.states else None)
+            file_sha256(args.states) if args.states else None, args.omit_screenshots)
         if mismatches:
             parser.error("the run differs from the baseline: " + "; ".join(mismatches))
 

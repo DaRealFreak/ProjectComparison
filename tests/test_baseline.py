@@ -17,7 +17,7 @@ from main import PageDiffProcessor  # noqa: E402
 
 MANIFEST = {
     "version": 1, "baseUrl": "http://a.example", "engine": "playwright", "sizes": ["800x600"],
-    "statesSha256": "abc", "cookiesSha256": None, "userAgent": None,
+    "statesSha256": "abc", "omitScreenshots": False, "cookiesSha256": None, "userAgent": None,
     "createdAt": "2026-11-02T00:00:00+00:00", "pages": {},
 }
 
@@ -40,6 +40,22 @@ class ManifestTest(unittest.TestCase):
         self.assertTrue(problems[0].startswith("sizes"))
         self.assertTrue(problems[1].startswith("states"))
         self.assertEqual(input_mismatches(MANIFEST, "playwright", ["800x600"], "abc"), [])
+
+    def test_screenshot_mode_mismatch_refused(self):
+        problems = input_mismatches(MANIFEST, "playwright", ["800x600"], "abc", True)
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(problems[0].startswith("screenshots"))
+        self.assertEqual(input_mismatches(MANIFEST, "playwright", ["800x600"], "abc", False), [])
+
+    def test_screenshot_mode_mismatch_refused_by_cli(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            write_baseline_manifest(temp_dir, dict(MANIFEST, statesSha256=None))
+            run = subprocess.run(
+                [sys.executable, "main.py", "--compare-baseline", temp_dir, "http://a.example",
+                 "--engine", "playwright", "--sizes", "800x600", "--omit-screenshots"],
+                cwd=REPO_ROOT, capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("screenshots", run.stderr)
 
     def test_baseline_input_mismatch_refused_by_cli(self):
         with tempfile.TemporaryDirectory() as temp_dir:

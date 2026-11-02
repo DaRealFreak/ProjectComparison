@@ -41,7 +41,7 @@ def read_baseline_manifest(dir: str) -> dict:
 
 
 def input_mismatches(manifest: dict, engine: str, sizes: list[str],
-                     states_sha256: Optional[str]) -> list[str]:
+                     states_sha256: Optional[str], omit_screenshots: bool = False) -> list[str]:
     """Name each run input that differs from the stored baseline."""
     problems = []
     if manifest.get("engine") != engine:
@@ -50,6 +50,11 @@ def input_mismatches(manifest: dict, engine: str, sizes: list[str],
         problems.append(f"sizes: baseline {','.join(manifest.get('sizes') or [])}, run {','.join(sizes)}")
     if manifest.get("statesSha256") != states_sha256:
         problems.append("states: the state file differs from the baseline")
+    # A run without screenshots against a baseline with them would pass partially.
+    if bool(manifest.get("omitScreenshots")) != omit_screenshots:
+        stored = "without" if manifest.get("omitScreenshots") else "with"
+        problems.append(f"screenshots: baseline {stored} screenshots, run "
+                        f"{'without' if omit_screenshots else 'with'}")
     return problems
 
 
@@ -142,10 +147,6 @@ def _stored_file_names(page: dict) -> list[str]:
 def compare_baseline(processor, baseline_dir: str, manifest: dict, dev_base_url: str,
                      urls_file: Optional[str], cookie_file: Optional[str]) -> None:
     """Capture the dev side and compare it with the stored live files."""
-    if manifest.get("omitScreenshots") and not processor.args.omit_screenshots:
-        logger.warning("The baseline has no screenshots, so screenshots are skipped.")
-        processor.args.omit_screenshots = True
-
     run_keys = {}
     for url in _run_urls(dev_base_url, urls_file):
         run_keys[page_key(url, dev_base_url)] = url
