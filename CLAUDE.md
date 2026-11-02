@@ -148,7 +148,8 @@ package. The helper must not override that variable. Do not bump the pin alone.
 
 - `id`: `^[a-z0-9][a-z0-9-]*$`, unique. `steps`: non-empty. `when` (optional CSS selector):
   the state applies only if it matches at least one element. `sizes` (optional list of
-  `WxH`): widths for this state; default is the run's `--sizes`. `fullscreen` never applies.
+  `WxH`): widths for this state; default is the run's `--sizes`. `fullscreen` never applies;
+  a state left with no width is refused at startup (exit 2, `states_without_widths`).
 - Actions: `click`, `hover`, `focus`, `waitFor` need `selector` (optional `index`, default 0);
   `press` needs `key`; `wait` needs `ms` (1 to 10000).
 - Each state and width is captured on a fresh page load. Files:
@@ -178,6 +179,7 @@ the baseline but not in the run, or the reverse, is a `[FAIL]`, as is a missing 
 Both modes refuse (exit 2) an empty `--urls` list or a URL outside the base URL, and a
 capture refuses an existing `baseline.json` unless `--remove-previous_results` is given.
 `main.py` runs these checks before the engine starts and before `DIR/pages/` is cleared.
+`--recursive` and `--recursive-max-level` are refused in the baseline modes.
 A capture exits 1 when a page failed to load or a state failed (`[FAIL] <key>: state <id>
 <size> failed: <reason>`); `baseline.json` is still written.
 

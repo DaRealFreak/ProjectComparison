@@ -121,6 +121,14 @@ def expected_state_entries(states: list[State], sizes: list[str]) -> list[tuple[
     return entries
 
 
+def states_without_widths(states: list[State], sizes: list[str]) -> list[str]:
+    """Return the ids of states that would be captured at no width at all."""
+    covered = set()
+    for state_id, _ in expected_state_entries(states, sizes):
+        covered.add(state_id)
+    return [state.id for state in states if state.id not in covered]
+
+
 def _describe(entry: Optional[dict]) -> str:
     return entry["outcome"] if entry else "missing"
 

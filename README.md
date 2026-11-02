@@ -92,7 +92,7 @@ python main.py <url_live> <url_dev> [options]
 | `--dev-cookies FILE` | — | JSON cookie file applied to the dev URL. |
 | `--htuser USER` | — | HTTP Basic Auth username (applied to both URLs). |
 | `--htpass PASS` | — | HTTP Basic Auth password. |
-| `--recursive` | off | Follow internal links and compare discovered pages. |
+| `--recursive` | off | Follow internal links and compare discovered pages. Not with the baseline modes (exit code 2). |
 | `--recursive-max-level N` | `1` | Maximum crawl depth when `--recursive` is set. |
 | `--include-files` | off | Also crawl links to downloadable/non-HTML files (PDFs, images, archives, …). By default these are skipped. |
 | `--engine ENGINE` | `selenium` | `selenium` or `playwright`. |
@@ -197,7 +197,8 @@ python main.py https://www.example.com https://dev.example.com --engine playwrig
 - `id` — lowercase letters, digits and `-`; unique. `steps` — at least one.
 - `when` (optional) — CSS selector; the state is captured only if it matches an element.
 - `sizes` (optional) — list of `WxH`; default is the run's `--sizes`. `fullscreen` is
-  never used for states.
+  never used for states, so a state without `sizes` in a run whose `--sizes` has no `WxH`
+  entry is refused at startup (exit code 2).
 - Actions: `click`, `hover`, `focus`, `waitFor` (need `selector`, optional `index`, default
   0), `press` (needs `key`), `wait` (needs `ms`, 1 to 10000).
 

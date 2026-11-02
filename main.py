@@ -19,7 +19,7 @@ import logging_config
 from image_comparator import ImageComparator
 from playwright_engine import (
     EngineUnavailable, PlaywrightEngine, compare_state_outcomes, expected_state_entries,
-    to_playwright_cookies,
+    states_without_widths, to_playwright_cookies,
 )
 from states import StateFileError, file_sha256, load_states
 
@@ -589,7 +589,9 @@ def main():
                         help="Set the logging level (default: INFO)")
     parser.add_argument("--recursive", action="store_true", default=False,
                         help="Enable recursive processing of internal links")
-    parser.add_argument("--recursive-max-level", type=int, default=1, help="Maximum recursion level (default: 1)")
+    # No default here, so main() can tell whether the option was given.
+    parser.add_argument("--recursive-max-level", type=int, default=None,
+                        help="Maximum recursion level (default: 1)")
     parser.add_argument("--include-files", action="store_true",
                         help="Also crawl links to downloadable/non-HTML files (PDFs, images, archives, ...). "
                              "By default these are skipped during recursive crawling.")
@@ -608,11 +610,16 @@ def main():
             parser.error("the baseline modes need --engine playwright")
         if args.live_cookies:
             parser.error("the baseline modes use --dev-cookies only")
+        if args.recursive or args.recursive_max_level is not None:
+            parser.error("the baseline modes do not crawl: drop --recursive and --recursive-max-level "
+                         "and list the pages with --urls")
     else:
         if len(args.positional_urls) != 2:
             parser.error("url_live and url_dev are required")
         if args.urls_file:
             parser.error("--urls needs --capture-baseline or --compare-baseline")
+    if args.recursive_max_level is None:
+        args.recursive_max_level = 1
     args.url_live = args.positional_urls[0] if args.positional_urls else None
     args.url_dev = args.positional_urls[1] if len(args.positional_urls) > 1 else None
     if args.states and args.engine != "playwright":
@@ -648,6 +655,12 @@ def main():
     else:
         resolutions = [(1920, 1080)]
     args.resolutions = resolutions
+
+    # A state without a width would be skipped without a [FAIL].
+    empty_states = states_without_widths(states, size_names(resolutions))
+    if empty_states:
+        parser.error(f"state {', '.join(empty_states)} has no width: --sizes has no WxH entry "
+                     f"and the state sets no sizes")
 
     manifest = None
     baseline_urls = []

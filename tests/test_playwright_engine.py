@@ -14,7 +14,7 @@ sys.path.insert(0, REPO_ROOT)
 import playwright_engine  # noqa: E402
 from playwright_engine import (  # noqa: E402
     EngineUnavailable, PlaywrightEngine, compare_state_outcomes, expected_state_entries,
-    to_playwright_cookies,
+    states_without_widths, to_playwright_cookies,
 )
 from states import State, Step  # noqa: E402
 
@@ -76,6 +76,31 @@ class CommandLineTest(unittest.TestCase):
         run = self.run_main()
         self.assertEqual(run.returncode, 2)
 
+    def test_state_without_width_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            states_file = os.path.join(temp_dir, "states.json")
+            with open(states_file, "w", encoding="utf-8") as handle:
+                json.dump({"version": 1, "states": [
+                    {"id": "menu", "steps": [{"action": "click", "selector": "#m"}]},
+                    {"id": "own", "sizes": ["400x600"], "steps": [{"action": "click", "selector": "#m"}]},
+                ]}, handle)
+            run = self.run_main("http://127.0.0.1:1/", "http://127.0.0.1:1/", "--engine", "playwright",
+                                "--states", states_file, "--sizes", "fullscreen",
+                                "--output-dir", os.path.join(temp_dir, "results"))
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("state menu has no width", run.stderr)
+        self.assertNotIn("menu, own", run.stderr)
+
+    def test_recursive_is_refused_in_baseline_modes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = os.path.join(temp_dir, "base")
+            for flags in (["--recursive"], ["--recursive-max-level", "2"]):
+                run = self.run_main("--capture-baseline", target, "http://127.0.0.1:1/", "--engine", "playwright",
+                                    *flags)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("--recursive", run.stderr)
+                self.assertFalse(os.path.exists(target))
+
 
 class CompareOutcomesTest(unittest.TestCase):
     def verdicts(self, expected, live, dev):
@@ -136,6 +161,14 @@ class ExpectedEntriesTest(unittest.TestCase):
             ("null", "800x600"), ("null", "1200x800"),
             ("empty", "800x600"), ("empty", "1200x800"),
         ])
+
+    def test_states_without_widths(self):
+        states = [
+            State(id="own", when=None, steps=self.STEP, sizes=("400x600",)),
+            State(id="run", when=None, steps=self.STEP, sizes=None),
+        ]
+        self.assertEqual(states_without_widths(states, ["fullscreen"]), ["run"])
+        self.assertEqual(states_without_widths(states, ["fullscreen", "800x600"]), [])
 
     def test_duplicate_sizes_collapse(self):
         states = [State(id="a", when=None, steps=self.STEP, sizes=None)]
