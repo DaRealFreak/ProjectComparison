@@ -63,6 +63,27 @@ def write_to_file(content: str, filename: str):
         f.write(content)
 
 
+def git_diff(old_file: str, new_file: str) -> tuple:
+    """
+    Returns (diff text, error). git diff --no-index exits 1 both for a difference and
+    for an unreadable file, so any stderr output or an exit code above 1 is an error.
+
+    :param old_file:
+    :param new_file:
+    :return:
+    """
+    try:
+        done = subprocess.run(["git", "diff", "--no-index", old_file, new_file], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    except OSError as error:
+        return "", f"git diff failed: {error}"
+    if done.returncode > 1 or done.stderr.strip():
+        lines = [line for line in done.stderr.splitlines() if line.strip()]
+        detail = lines[-1] if lines else f"exit code {done.returncode}"
+        return "", f"git diff failed: {detail}"
+    return done.stdout, None
+
+
 def inject_auth(url: str, username: str, password: str) -> str:
     """
     Injects HTTP Basic Auth credentials into a URL.
@@ -323,6 +344,11 @@ class PageDiffProcessor:
         """Return the run sizes in the helper's text form."""
         return size_names(self.args.resolutions)
 
+    @staticmethod
+    def log_fail(message: str) -> None:
+        logger.info(message)
+        print(logging_config.COLOR_FAIL + message + logging_config.RESET_ALL)
+
     def compare_states(self, live_info: dict, dev_info: dict, output_dir: str):
         """
         Compares the captured interaction states of both sides.
@@ -342,17 +368,27 @@ class PageDiffProcessor:
                 logger.info(f"state {state_id} {size}: not applicable (absent on both sides)")
             elif verdict == "fail":
                 failures += 1
-                fail_msg = f"[FAIL] state {state_id} {size}: {message}"
-                logger.info(fail_msg)
-                print(logging_config.COLOR_FAIL + fail_msg + logging_config.RESET_ALL)
+                self.log_fail(f"[FAIL] state {state_id} {size}: {message}")
             else:
+                # A missing file must fail: git diff would report it as no difference.
+                needed = [f"{prefix}_html_live.html", f"{prefix}_html_dev.html"]
+                if not self.args.omit_screenshots:
+                    needed += [f"{prefix}_live.png", f"{prefix}_dev.png"]
+                missing = [name for name in needed if not os.path.isfile(os.path.join(output_dir, name))]
+                for name in missing:
+                    failures += 1
+                    self.log_fail(f"[FAIL] state {state_id} {size}: missing file {name}")
+                if missing:
+                    continue
                 html_live = os.path.join(output_dir, f"{prefix}_html_live.html")
                 html_dev = os.path.join(output_dir, f"{prefix}_html_dev.html")
-                diff = subprocess.run(["git", "diff", "--no-index", html_live, html_dev],
-                                      stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
-                if diff.stdout:
+                diff_text, diff_error = git_diff(html_live, html_dev)
+                if diff_error:
+                    failures += 1
+                    self.log_fail(f"[FAIL] state {state_id} {size}: {diff_error}")
+                elif diff_text:
                     diff_file = os.path.join(output_dir, f"{prefix}_html-difference.diff")
-                    write_to_file(diff.stdout, diff_file)
+                    write_to_file(diff_text, diff_file)
                     logger.info(f"State HTML diff saved to: {diff_file}")
                     differences.append(f"state {state_id} {size} HTML")
                 if not self.args.omit_screenshots:
@@ -476,11 +512,10 @@ class PageDiffProcessor:
         write_to_file(live_html, live_html_file)
         write_to_file(dev_html, dev_html_file)
 
-        # generate HTML diff
-        diff_cmd = ["git", "diff", "--no-index", live_html_file, dev_html_file]
-        result = subprocess.run(diff_cmd, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        # generate HTML diff; both files were written just above
+        html_diff_text, html_diff_error = git_diff(live_html_file, dev_html_file)
         html_diff_file = os.path.join(sub_output_dir, "html-difference.diff")
-        write_to_file(result.stdout, html_diff_file)
+        write_to_file(html_diff_text, html_diff_file)
         logger.info(f"HTML diff saved to: {html_diff_file}")
 
         # compare screenshots
@@ -517,10 +552,12 @@ class PageDiffProcessor:
 
         # log summary for this page
         html_fail = os.path.getsize(html_diff_file) > 0
-        if status_fail or html_fail or image_diffs or state_diffs or state_failures:
+        if status_fail or html_diff_error or html_fail or image_diffs or state_diffs or state_failures:
             fail_msg = f"[FAIL] - {live_url} ({dev_url})"
             if status_fail:
                 fail_msg += " - HTTP status differs"
+            if html_diff_error:
+                fail_msg += f" - HTML {html_diff_error}"
             if html_fail:
                 fail_msg += " - HTML differences found"
             if image_diffs:

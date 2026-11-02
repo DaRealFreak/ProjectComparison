@@ -64,7 +64,9 @@ neither. Don't claim to have run a suite you did not run.
   code 2.
 
 - **`git` must be on PATH at runtime.** HTML diffing shells out to `git diff --no-index`
-  (`main.py`), not a Python diff library.
+  (`main.py`, `git_diff`), not a Python diff library. git exits 1 both for a difference and
+  for an unreadable file, so `git_diff` treats any stderr output or an exit code above 1
+  as an error, which fails the page (or the state).
 - **Network access on first run.** `ChromeInstaller` downloads Chrome + chromedriver from
   the Chrome for Testing endpoints into `tmp/` (cached across runs). `--version` pins a
   build; default `latest` queries the LATEST_RELEASE_STABLE endpoint.
@@ -169,7 +171,9 @@ expected list comes from the state file, not from what the helper returned, so a
 side cannot pass. Rules (`compare_state_outcomes`): `captured` on both sides is diffed
 (HTML and screenshot); `absent` on both sides is "not applicable" and only logged; every
 other combination, including `failed` and a missing entry, is a `[FAIL]` line
-(`[FAIL] state <id> <size>: <outcomes> ...`). A state failure fails the page.
+(`[FAIL] state <id> <size>: <outcomes> ...`). For `captured` on both sides, every file the
+comparison needs (both HTML files, and both PNGs unless `--omit-screenshots`) must exist,
+else `[FAIL] state <id> <size>: missing file <name>`. A state failure fails the page.
 
 **Baselines.** `--capture-baseline DIR <url>` captures the pages once and stores them as
 the "live" side; `--compare-baseline DIR <url>` captures the current site as "dev" and

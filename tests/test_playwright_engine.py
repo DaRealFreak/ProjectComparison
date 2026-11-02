@@ -20,7 +20,7 @@ from playwright_engine import (  # noqa: E402
     states_without_widths, to_playwright_cookies,
 )
 from image_comparator import ImageComparator  # noqa: E402
-from main import PageDiffProcessor  # noqa: E402
+from main import PageDiffProcessor, git_diff  # noqa: E402
 from states import State, Step  # noqa: E402
 
 
@@ -160,8 +160,8 @@ class CompareOutcomesTest(unittest.TestCase):
         self.assertEqual([(r[0], r[1]) for r in rows], expected)
 
 
-def make_processor(output_dir, states=None, omit_screenshots=True):
-    args = SimpleNamespace(resolutions=[], omit_screenshots=omit_screenshots, threshold=0,
+def make_processor(output_dir, states=None, omit_screenshots=True, resolutions=()):
+    args = SimpleNamespace(resolutions=list(resolutions), omit_screenshots=omit_screenshots, threshold=0,
                            always_generate_diff=False)
     return PageDiffProcessor(None, ImageComparator(threshold=0), output_dir, args, states=states)
 
@@ -200,6 +200,69 @@ class StatusCompareTest(unittest.TestCase):
         output = self.compare(selenium_info, selenium_info)
         self.assertNotIn("status", output)
         self.assertIn("[PASS]", output)
+
+
+class BaseHtmlDiffTest(unittest.TestCase):
+    def test_git_error_fails_the_page(self):
+        info = {"ok": True, "error": None, "status": 200, "states": []}
+        broken_git = subprocess.CompletedProcess(["git"], 128, stdout="", stderr="fatal: broken\n")
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as temp_dir, contextlib.redirect_stdout(output), \
+                mock.patch("main.subprocess.run", return_value=broken_git):
+            make_processor(temp_dir).compare_captures(
+                "http://live/x", "http://dev/x", temp_dir, ("<p>a</p>", {}, info), ("<p>a</p>", {}, info), "/x")
+        self.assertIn("HTML git diff failed: fatal: broken", output.getvalue())
+        self.assertNotIn("[PASS]", output.getvalue())
+
+
+class StateFileCheckTest(unittest.TestCase):
+    STATE = State(id="a", when=None, steps=(Step(action="click", selector="#x"),), sizes=None)
+    CAPTURED = {"states": [entry("a", "800x600", "captured")]}
+
+    def compare_states(self, temp_dir, present, omit_screenshots):
+        for name in present:
+            with open(os.path.join(temp_dir, name), "w", encoding="utf-8") as handle:
+                handle.write("<p>same</p>")
+        processor = make_processor(temp_dir, [self.STATE], omit_screenshots, [(800, 600)])
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            _, failures = processor.compare_states(self.CAPTURED, self.CAPTURED, temp_dir)
+        return output.getvalue(), failures
+
+    def test_missing_state_html_fails(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output, failures = self.compare_states(temp_dir, ["state-a_800x600_html_live.html"], True)
+        self.assertIn("[FAIL] state a 800x600: missing file state-a_800x600_html_dev.html", output)
+        self.assertEqual(failures, 1)
+
+    def test_missing_state_screenshot_fails(self):
+        present = ["state-a_800x600_html_live.html", "state-a_800x600_html_dev.html", "state-a_800x600_live.png"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output, failures = self.compare_states(temp_dir, present, False)
+        self.assertIn("[FAIL] state a 800x600: missing file state-a_800x600_dev.png", output)
+        self.assertEqual(failures, 1)
+
+
+class GitDiffTest(unittest.TestCase):
+    def test_unreadable_file_is_an_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            present = os.path.join(temp_dir, "a.html")
+            with open(present, "w", encoding="utf-8") as handle:
+                handle.write("<p>a</p>")
+            text, error = git_diff(present, os.path.join(temp_dir, "missing.html"))
+        self.assertEqual(text, "")
+        self.assertIn("git diff failed", error)
+
+    def test_difference_is_not_an_error(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            names = []
+            for name, body in (("a.html", "<p>a</p>\n"), ("b.html", "<p>b</p>\n")):
+                names.append(os.path.join(temp_dir, name))
+                with open(names[-1], "w", encoding="utf-8") as handle:
+                    handle.write(body)
+            text, error = git_diff(*names)
+        self.assertIsNone(error)
+        self.assertIn("+<p>b</p>", text)
 
 
 class ExpectedEntriesTest(unittest.TestCase):

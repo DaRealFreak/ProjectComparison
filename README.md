@@ -220,6 +220,10 @@ or timed out). Rules:
 | `absent` | `absent` | not applicable (only logged) |
 | anything else, including a missing capture | | `[FAIL] state <id> <size>: ...` |
 
+A state captured on both sides whose HTML or screenshot file is missing is
+`[FAIL] state <id> <size>: missing file <name>`. An error from `git diff` fails the page or
+the state; it never counts as "no difference".
+
 ### Baselines
 
 A baseline stores one capture so you can compare against it after the original
