@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -14,7 +15,7 @@ if (!existsSync(join(here, 'node_modules', 'playwright'))) {
   throw new Error('run "npm ci" in playwright_capture first');
 }
 
-function runCapture(overrides) {
+function writeRequest(overrides) {
   const outDir = mkdtempSync(join(tmpdir(), 'capture-'));
   const request = {
     url: fixtureUrl,
@@ -31,11 +32,53 @@ function runCapture(overrides) {
   };
   const requestFile = join(outDir, 'request.json');
   writeFileSync(requestFile, JSON.stringify(request));
+  return { outDir, requestFile };
+}
+
+function runCapture(overrides) {
+  const { outDir, requestFile } = writeRequest(overrides);
   const run = spawnSync('node', [join(here, 'capture.mjs'), '--request', requestFile], {
     encoding: 'utf8',
   });
   assert.equal(run.status, 0, run.stderr);
   return { outDir, result: JSON.parse(run.stdout) };
+}
+
+// Async, so HTTP servers in this process can answer while the helper runs.
+function runCaptureAsync(overrides) {
+  const { outDir, requestFile } = writeRequest(overrides);
+  return new Promise((resolve, reject) => {
+    const child = spawn('node', [join(here, 'capture.mjs'), '--request', requestFile]);
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`capture exited with ${code}: ${stderr}${stdout}`));
+        return;
+      }
+      resolve({ outDir, result: JSON.parse(stdout) });
+    });
+  });
+}
+
+function listen(server) {
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+}
+
+function stop(server) {
+  server.closeAllConnections();
+  return new Promise((resolve) => {
+    server.close(resolve);
+  });
 }
 
 function pngWidth(file) {
@@ -131,5 +174,40 @@ test('storage set by a step does not reach the next load', () => {
   assert.equal(result.states.length, 2);
   for (const entry of result.states) {
     assert.equal(entry.outcome, 'captured', `${entry.size}: ${entry.outcome}`);
+  }
+});
+
+test('credentials are sent only to the origin of the page', async () => {
+  const otherHostAuth = [];
+  const otherHost = createServer((request, response) => {
+    otherHostAuth.push(request.headers.authorization || null);
+    response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="other"' });
+    response.end();
+  });
+  await listen(otherHost);
+  const expected = `Basic ${Buffer.from('user:secret').toString('base64')}`;
+  const site = createServer((request, response) => {
+    if (request.headers.authorization !== expected) {
+      response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="site"' });
+      response.end();
+      return;
+    }
+    const image = `http://127.0.0.1:${otherHost.address().port}/pixel.png`;
+    response.writeHead(200, { 'Content-Type': 'text/html' });
+    response.end(`<!doctype html><title>Auth</title><img src="${image}">`);
+  });
+  await listen(site);
+  try {
+    const { result } = await runCaptureAsync({
+      url: `http://127.0.0.1:${site.address().port}/`,
+      httpCredentials: { username: 'user', password: 'secret' },
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.equal(result.status, 200);
+    assert.ok(otherHostAuth.length > 0, 'the page did not request the other host');
+    assert.deepEqual(otherHostAuth.filter(Boolean), []);
+  } finally {
+    await stop(site);
+    await stop(otherHost);
   }
 });

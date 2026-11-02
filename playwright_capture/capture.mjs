@@ -26,7 +26,8 @@ function viewportFor(sizeName) {
 async function openContext(browser, request) {
   const options = { ignoreHTTPSErrors: true };
   if (request.httpCredentials) {
-    options.httpCredentials = request.httpCredentials;
+    // Without an origin, Playwright sends the password to any host that answers 401.
+    options.httpCredentials = { ...request.httpCredentials, origin: new URL(request.url).origin };
   }
   if (request.userAgent) {
     options.userAgent = request.userAgent;

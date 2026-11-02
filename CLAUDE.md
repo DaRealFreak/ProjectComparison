@@ -122,6 +122,8 @@ side and page. The helper writes the same file names as the Selenium path
 (`html_<label>.html`, `<WxH>_<label>.png`, `fullscreen_<label>.png`) plus the state files
 below, and prints one JSON result. Python does all diffing. Cookies are converted from the
 Selenium format; credentials and cookies are never printed or stored in a baseline.
+`--htuser`/`--htpass` are given to Playwright for the page URL's origin only, so a
+third-party host that answers 401 does not get the password.
 Every screenshot size is a fresh page load, so the result does not depend on the order of
 `--sizes`; the HTML and the HTTP status come from the first `WxH`, and `fullscreen` is
 taken at a 1920x1080 viewport, as in the Selenium path. Each load (base size or state and
