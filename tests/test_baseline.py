@@ -373,6 +373,29 @@ class LogRedactionTest(unittest.TestCase):
         self.assertIn("https://***@h:8080/", out)
         self.assertEqual(self.emit("plain http://h/a@b"), "plain http://h/a@b\n")
 
+    def test_unencoded_at_sign_in_password_is_redacted(self):
+        out = self.emit("go to http://us:pa@%s@h.example/p", SECRET)
+        self.assertNotIn(SECRET, out)
+        self.assertIn("http://***@h.example/p", out)
+
+    def test_exception_text_is_redacted(self):
+        buffer = io.StringIO()
+        handler = logging.StreamHandler(buffer)
+        handler.addFilter(logging_config.RedactCredentials())
+        logger = logging.getLogger("redaction-exc-test")
+        logger.propagate = False
+        logger.addHandler(handler)
+        try:
+            try:
+                raise RuntimeError(f"navigation to http://us:{SECRET}@h.example/ failed")
+            except RuntimeError:
+                logger.exception("capture failed")
+            logger.error("stack", stack_info=True, extra={})
+        finally:
+            logger.removeHandler(handler)
+        self.assertNotIn(SECRET, buffer.getvalue())
+        self.assertIn("http://***@h.example/", buffer.getvalue())
+
     def test_setup_logging_filters_every_root_handler(self):
         root = logging.getLogger()
         saved, saved_level = root.handlers[:], root.level
