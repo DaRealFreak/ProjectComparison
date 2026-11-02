@@ -374,7 +374,7 @@ class PageDiffProcessor:
                 failures += 1
                 self.log_fail(f"[FAIL] state {state_id} {size}: {message}")
             else:
-                # A missing file must fail: git diff would report it as no difference.
+                # Name each missing file instead of a git error on a missing path.
                 needed = [f"{prefix}_html_live.html", f"{prefix}_html_dev.html"]
                 if not self.args.omit_screenshots:
                     needed += [f"{prefix}_live.png", f"{prefix}_dev.png"]
@@ -475,9 +475,7 @@ class PageDiffProcessor:
         engine has no status, so both sides are None there.
         """
         if live_status != dev_status:
-            fail_msg = f"[FAIL] {page_path}: status {live_status} on live, {dev_status} on dev"
-            logger.info(fail_msg)
-            print(logging_config.COLOR_FAIL + fail_msg + logging_config.RESET_ALL)
+            PageDiffProcessor.log_fail(f"[FAIL] {page_path}: status {live_status} on live, {dev_status} on dev")
             return True
         # Error pages are compared on purpose, so the same error status only warns.
         if live_status is not None and live_status >= 400:
