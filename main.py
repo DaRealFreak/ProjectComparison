@@ -224,7 +224,7 @@ class PageDiffProcessor:
         :return:
         """
         auth = None
-        if self.args.htuser and self.args.htpass:
+        if self.args.htuser is not None and self.args.htpass is not None:
             auth = (self.args.htuser, self.args.htpass)
         try:
             response = requests.head(url, allow_redirects=True, timeout=10, verify=False, auth=auth)
@@ -271,7 +271,7 @@ class PageDiffProcessor:
             return self.capture_page_playwright(url, label, output_dir, cookie_file, capture_screenshots)
 
         # inject HTTP Basic Auth credentials if provided.
-        if self.args.htuser and self.args.htpass:
+        if self.args.htuser is not None and self.args.htpass is not None:
             url = inject_auth(url, self.args.htuser, self.args.htpass)
 
         self.site_comparator.driver.get(url)
@@ -312,7 +312,7 @@ class PageDiffProcessor:
             with open(cookie_file, "r", encoding="utf-8") as f:
                 cookies = to_playwright_cookies(json.load(f), url)
         credentials = None
-        if self.args.htuser and self.args.htpass:
+        if self.args.htuser is not None and self.args.htpass is not None:
             credentials = {"username": self.args.htuser, "password": self.args.htpass}
 
         result = self.engine.capture(
@@ -682,6 +682,33 @@ def main():
             parser.error("--urls needs --capture-baseline or --compare-baseline")
     if args.recursive_max_level is None:
         args.recursive_max_level = 1
+    # From here on, no URL carries a password: it would reach logs and baseline files.
+    url_credentials = []
+    clean_urls = []
+    for url in args.positional_urls:
+        clean_url, found = baseline.split_credentials(url)
+        clean_urls.append(clean_url)
+        if found:
+            url_credentials.append(found)
+    args.positional_urls = clean_urls
+    if args.urls_file:
+        try:
+            for url in baseline.read_urls_file(args.urls_file):
+                found = baseline.split_credentials(url)[1]
+                if found:
+                    url_credentials.append(found)
+        except baseline.BaselineError as e:
+            parser.error(str(e))
+    if url_credentials:
+        user, password = url_credentials[0]
+        different = any(found != (user, password) for found in url_credentials)
+        if args.htuser is not None and args.htuser != user:
+            different = True
+        if args.htpass is not None and args.htpass != password:
+            different = True
+        if different:
+            parser.error("the URLs and --htuser/--htpass give different credentials; use one set")
+        args.htuser, args.htpass = user, password
     args.url_live = args.positional_urls[0] if args.positional_urls else None
     args.url_dev = args.positional_urls[1] if len(args.positional_urls) > 1 else None
     if args.states and args.engine != "playwright":

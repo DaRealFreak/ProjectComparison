@@ -92,7 +92,7 @@ python main.py <url_live> <url_dev> [options]
 | `--live-cookies FILE` | — | JSON cookie file applied to the live URL. |
 | `--dev-cookies FILE` | — | JSON cookie file applied to the dev URL. |
 | `--htuser USER` | — | HTTP Basic Auth username (applied to both URLs). |
-| `--htpass PASS` | — | HTTP Basic Auth password. |
+| `--htpass PASS` | — | HTTP Basic Auth password. A `user:password@host` URL (positional or in a `--urls` file) works too: the credentials are removed from the URL first, so they never reach logs, `baseline.json` or other files. Different credentials in the URLs and in `--htuser`/`--htpass` are refused (exit code 2). |
 | `--recursive` | off | Follow internal links and compare discovered pages. Not with the baseline modes (exit code 2). |
 | `--recursive-max-level N` | `1` | Maximum crawl depth when `--recursive` is set. |
 | `--include-files` | off | Also crawl links to downloadable/non-HTML files (PDFs, images, archives, …). By default these are skipped. |

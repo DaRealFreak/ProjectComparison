@@ -7,8 +7,10 @@ capture and the comparison, like an upgrade would change it. Run with no argumen
 
     python tests/baseline_smoke_test.py
 """
+import base64
 import functools
 import http.server
+import json
 import os
 import shutil
 import subprocess
@@ -28,6 +30,33 @@ RUN_TIMEOUT = 300
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
+
+
+SECRET = "Zq9-synthetic-pw"
+
+
+class AuthHandler(QuietHandler):
+    """Serve files only with the Basic Auth header user:SECRET."""
+
+    def do_GET(self):
+        expected = "Basic " + base64.b64encode(f"user:{SECRET}".encode()).decode()
+        if self.headers.get("Authorization") != expected:
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="test"')
+            self.end_headers()
+            return
+        super().do_GET()
+
+
+def files_containing(root, text):
+    found = []
+    for folder, _, names in os.walk(root):
+        for name in names:
+            path = os.path.join(folder, name)
+            with open(path, "rb") as handle:
+                if text.encode() in handle.read():
+                    found.append(path)
+    return found
 
 
 class BaselineSmokeTest(unittest.TestCase):
@@ -136,6 +165,26 @@ class BaselineSmokeTest(unittest.TestCase):
         self.assertEqual(run.returncode, 1)
         self.assertIn("[FAIL] /: state box-open 800x600 failed: step 2:", run.stdout)
         self.assertTrue(os.path.isfile(os.path.join(self.baseline_dir, "baseline.json")))
+
+    def test_credentials_in_the_url_reach_the_site_but_not_the_files(self):
+        httpd = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0), functools.partial(AuthHandler, directory=self.site))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        url = f"http://user:{SECRET}@127.0.0.1:{httpd.server_address[1]}/"
+        run = self.run_main("auth-capture", "--capture-baseline", self.baseline_dir, url)
+        self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertNotIn(SECRET, run.stdout)
+        with open(os.path.join(self.baseline_dir, "baseline.json"), encoding="utf-8") as handle:
+            self.assertTrue(json.load(handle)["pages"]["/"]["ok"])
+        run = self.run_main("auth-compare", "--compare-baseline", self.baseline_dir, url)
+        self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertIn("[PASS]", run.stdout)
+        self.assertNotIn(SECRET, run.stdout)
+        self.assertEqual(files_containing(self.temp.name, SECRET), [])
+        self.assertEqual(files_containing(os.path.join(RESULTS, "auth-compare"), SECRET), [])
+        self.assertEqual(files_containing(os.path.join(RESULTS, "auth-capture"), SECRET), [])
 
     def test_baseline_page_that_failed_to_load_is_a_failure(self):
         # Port 1 refuses connections, so the stored page records a failed load.

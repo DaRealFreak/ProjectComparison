@@ -5,6 +5,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import logging_config
 from states import file_sha256
@@ -62,6 +63,16 @@ def input_mismatches(manifest: dict, engine: str, sizes: list[str], states_sha25
     return problems
 
 
+def split_credentials(url: str) -> tuple[str, Optional[tuple[str, str]]]:
+    """Return the URL without user:password@ and the decoded (user, password), or None."""
+    parts = urlsplit(url)
+    userinfo, at, host = parts.netloc.rpartition("@")
+    if not at:
+        return url, None
+    user, _, password = userinfo.partition(":")
+    return urlunsplit(parts._replace(netloc=host)), (unquote(user), unquote(password))
+
+
 def read_urls_file(path: str) -> list[str]:
     """Read one URL per line; blank lines and # comments are skipped."""
     urls = []
@@ -93,7 +104,8 @@ def run_urls(base_url: str, urls_file: Optional[str]) -> list[str]:
     """Return the pages of a baseline run; refuse an empty list and URLs outside the base URL."""
     if not urls_file:
         return [base_url]
-    urls = read_urls_file(urls_file)
+    # Credentials never belong in a stored or logged URL.
+    urls = [split_credentials(url)[0] for url in read_urls_file(urls_file)]
     if not urls:
         raise BaselineError(f"{urls_file} lists no URL")
     for url in urls:

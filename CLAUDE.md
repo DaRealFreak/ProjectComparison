@@ -116,8 +116,12 @@ The flow is a single pass orchestrated by `PageDiffProcessor` in `main.py`:
 - **Cookies** are JSON arrays of Selenium cookie dicts (`cookies_live.json`,
   `cookies_dev.json` are committed examples). They're applied *after* an initial navigation
   so the domain is set, then the page is reloaded.
-- **HTTP Basic Auth** is injected directly into the URL (`inject_auth`,
+- **HTTP Basic Auth** is injected directly into the URL at navigation time (`inject_auth`,
   `https://user:pass@host/...`), URL-encoding credentials and stripping any existing auth.
+  `main()` first removes `user:pass@` from every input URL (positional and `--urls`;
+  `baseline.split_credentials`) and moves it into `args.htuser`/`args.htpass`, so logs,
+  `baseline.json`, keys and request files only hold the clean URL. Differing credentials
+  exit 2.
 
 ## Playwright engine, states and baselines
 

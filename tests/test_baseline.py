@@ -182,6 +182,109 @@ class CompareBaselineTest(unittest.TestCase):
         self.assertNotIn("[FAIL]", output)
 
 
+SECRET = "Zq9-synthetic-pw"
+CREDENTIAL_BASE = f"http://us%40er:{SECRET}@127.0.0.1:1/"
+
+
+def files_containing(root, text):
+    """Return every file below root whose bytes contain text."""
+    found = []
+    for folder, _, names in os.walk(root):
+        for name in names:
+            path = os.path.join(folder, name)
+            with open(path, "rb") as handle:
+                if text.encode() in handle.read():
+                    found.append(path)
+    return found
+
+
+class UrlCredentialsTest(unittest.TestCase):
+    def test_split_credentials(self):
+        self.assertEqual(baseline.split_credentials(f"https://us%40er:p%3Ass@host:8080/p?q=1#f"),
+                         ("https://host:8080/p?q=1#f", ("us@er", "p:ss")))
+        self.assertEqual(baseline.split_credentials("http://user@host/"), ("http://host/", ("user", "")))
+        self.assertEqual(baseline.split_credentials("http://host/a@b"), ("http://host/a@b", None))
+        self.assertEqual(baseline.split_credentials("http://[::1]:80/"), ("http://[::1]:80/", None))
+
+    def test_run_urls_returns_urls_without_credentials(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            urls_file = os.path.join(temp_dir, "urls.txt")
+            with open(urls_file, "w", encoding="utf-8") as handle:
+                handle.write(f"http://u:{SECRET}@h.example/a\nhttp://h.example/b\n")
+            self.assertEqual(baseline.run_urls("http://h.example/", urls_file),
+                             ["http://h.example/a", "http://h.example/b"])
+
+
+class UrlCredentialsCommandLineTest(unittest.TestCase):
+    def run_main(self, *args):
+        return subprocess.run([sys.executable, "main.py", "--log-level", "DEBUG", *args], cwd=REPO_ROOT,
+                              capture_output=True, text=True, timeout=120)
+
+    def test_failed_capture_leaves_no_password_behind(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = os.path.join(temp_dir, "base")
+            results = os.path.join(temp_dir, "results")
+            run = self.run_main("--capture-baseline", target, CREDENTIAL_BASE, "--engine", "playwright",
+                                "--sizes", "800x600", "--output-dir", results)
+            self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+            self.assertIn("[FAIL] /: page failed to load", run.stdout)
+            self.assertNotIn(SECRET, run.stdout + run.stderr)
+            self.assertEqual(files_containing(temp_dir, SECRET), [])
+            with open(os.path.join(target, "baseline.json"), encoding="utf-8") as handle:
+                self.assertEqual(json.load(handle)["pages"]["/"]["url"], "http://127.0.0.1:1/")
+
+    def test_compare_leaves_no_password_behind(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = os.path.join(temp_dir, "base")
+            stored_dir = os.path.join(target, "pages", "index")
+            os.makedirs(stored_dir)
+            with open(os.path.join(stored_dir, "html_live.html"), "w", encoding="utf-8") as handle:
+                handle.write("<p>stored</p>")
+            page = {"url": "http://127.0.0.1:1/", "dir": "index", "ok": True, "error": None,
+                    "status": 200, "files": ["html_live.html"], "states": []}
+            write_baseline_manifest(target, dict(MANIFEST, statesSha256=None, omitScreenshots=True,
+                                                 pages={"/": page}))
+            results = os.path.join(temp_dir, "results")
+            run = self.run_main("--compare-baseline", target, CREDENTIAL_BASE, "--engine", "playwright",
+                                "--sizes", "800x600", "--omit-screenshots", "--output-dir", results)
+            self.assertNotIn(SECRET, run.stdout + run.stderr)
+            self.assertNotIn("Traceback", run.stderr)
+            self.assertEqual(files_containing(temp_dir, SECRET), [])
+
+    def test_credentials_in_both_urls_do_not_reach_the_output(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            results = os.path.join(temp_dir, "results")
+            run = self.run_main(CREDENTIAL_BASE, CREDENTIAL_BASE, "--engine", "playwright",
+                                "--sizes", "800x600", "--omit-screenshots", "--output-dir", results)
+            self.assertNotIn(SECRET, run.stdout + run.stderr)
+            self.assertEqual(files_containing(temp_dir, SECRET), [])
+
+    def test_conflicting_credentials_are_refused(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            results = os.path.join(temp_dir, "results")
+            cases = (
+                [CREDENTIAL_BASE, "http://other:x@127.0.0.1:1/"],
+                [CREDENTIAL_BASE, "http://127.0.0.1:1/", "--htuser", "someone", "--htpass", "else"],
+                [CREDENTIAL_BASE, "http://127.0.0.1:1/", "--htuser", "us@er", "--htpass", "different"],
+            )
+            for case in cases:
+                run = self.run_main(*case, "--engine", "playwright", "--output-dir", results)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("different credentials", run.stderr)
+                self.assertNotIn(SECRET, run.stdout + run.stderr)
+
+    def test_conflicting_credentials_in_the_url_file_are_refused(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            urls_file = os.path.join(temp_dir, "urls.txt")
+            with open(urls_file, "w", encoding="utf-8") as handle:
+                handle.write("http://other:x@127.0.0.1:1/a\n")
+            run = self.run_main("--capture-baseline", os.path.join(temp_dir, "base"), CREDENTIAL_BASE,
+                                "--urls", urls_file, "--engine", "playwright")
+            self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+            self.assertIn("different credentials", run.stderr)
+            self.assertNotIn(SECRET, run.stdout + run.stderr)
+
+
 class CommandLineTest(unittest.TestCase):
     def run_main(self, *args):
         return subprocess.run([sys.executable, "main.py", *args], cwd=REPO_ROOT,
