@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -14,6 +15,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
 import baseline  # noqa: E402
+import logging_config  # noqa: E402
 from baseline import input_mismatches, read_baseline_manifest, write_baseline_manifest  # noqa: E402
 from image_comparator import ImageComparator  # noqa: E402
 from main import PageDiffProcessor  # noqa: E402
@@ -283,6 +285,48 @@ class UrlCredentialsCommandLineTest(unittest.TestCase):
             self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
             self.assertIn("different credentials", run.stderr)
             self.assertNotIn(SECRET, run.stdout + run.stderr)
+
+
+class LogRedactionTest(unittest.TestCase):
+    def emit(self, message, *args):
+        buffer = io.StringIO()
+        handler = logging.StreamHandler(buffer)
+        handler.addFilter(logging_config.RedactCredentials())
+        logger = logging.getLogger("redaction-test")
+        logger.propagate = False
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(handler)
+        try:
+            logger.debug(message, *args)
+        finally:
+            logger.removeHandler(handler)
+        return buffer.getvalue()
+
+    def test_message_and_args_are_redacted(self):
+        out = self.emit("go to http://us:%s@h.example/p", SECRET)
+        self.assertNotIn(SECRET, out)
+        self.assertNotIn("us:", out)
+        self.assertIn("http://***@h.example/p", out)
+        out = self.emit("%s %s %s", "POST", "https://u:p%40ss@h/x", {"url": f"https://user@h:8080/{SECRET[:3]}"})
+        self.assertNotIn("p%40ss", out)
+        self.assertIn("https://***@h/x", out)
+        self.assertIn("https://***@h:8080/", out)
+        self.assertEqual(self.emit("plain http://h/a@b"), "plain http://h/a@b\n")
+
+    def test_setup_logging_filters_every_root_handler(self):
+        root = logging.getLogger()
+        saved, saved_level = root.handlers[:], root.level
+        buffer = io.StringIO()
+        root.handlers = [logging.StreamHandler(buffer), logging.StreamHandler(buffer)]
+        try:
+            logging_config.setup_logging("DEBUG")
+            root.setLevel(logging.DEBUG)
+            logging.getLogger("selenium.test").debug("%s %s", "POST", f"{{'url': 'http://u:{SECRET}@h/'}}")
+        finally:
+            root.handlers = saved
+            root.setLevel(saved_level)
+        self.assertNotIn(SECRET, buffer.getvalue())
+        self.assertIn("http://***@h/", buffer.getvalue())
 
 
 class CommandLineTest(unittest.TestCase):

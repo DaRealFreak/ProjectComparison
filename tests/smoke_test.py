@@ -58,7 +58,7 @@ def serve(directory: str):
     return httpd, httpd.server_address[1]
 
 
-def run_comparison(live_url: str, dev_url: str, output_dir: str) -> subprocess.CompletedProcess:
+def run_comparison(live_url: str, dev_url: str, output_dir: str, *extra: str) -> subprocess.CompletedProcess:
     """Run ``main.py`` for a single comparison and capture combined output.
 
     stderr is merged into stdout because the per-page ``[PASS]``/``[FAIL]`` summary
@@ -69,7 +69,7 @@ def run_comparison(live_url: str, dev_url: str, output_dir: str) -> subprocess.C
         sys.executable, "main.py", live_url, dev_url,
         "--output-dir", output_dir,
         "--remove-previous_results",
-        "--sizes", "1024x640,fullscreen",
+        "--sizes", "1024x640,fullscreen", *extra,
     ]
     print(f"\n$ {' '.join(cmd)}", flush=True)
     proc = subprocess.run(
@@ -113,6 +113,17 @@ def main() -> int:
             failures.append(f"changed run exited with code {proc.returncode}")
         elif "[FAIL]" not in proc.stdout:
             failures.append("differing pages did not report [FAIL]")
+
+        # Scenario 3: a credential URL at DEBUG level must not leak the password into the log.
+        secret = "Zq9-synthetic-pw"
+        proc = run_comparison(
+            f"http://user:{secret}@127.0.0.1:{live_port}/index.html", f"{dev}/index.html",
+            os.path.join(RESULTS, "credentials"), "--log-level", "DEBUG",
+        )
+        if proc.returncode != 0:
+            failures.append(f"credential run exited with code {proc.returncode}")
+        elif secret in proc.stdout:
+            failures.append("the password appears in the DEBUG log")
     finally:
         live_httpd.shutdown()
         dev_httpd.shutdown()
