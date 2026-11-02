@@ -253,6 +253,17 @@ class GitDiffTest(unittest.TestCase):
         self.assertEqual(text, "")
         self.assertIn("git diff failed", error)
 
+    def test_line_ending_settings_do_not_cause_an_error(self):
+        # Git for Windows sets core.autocrlf=true, which makes git warn about LF files.
+        windows_git = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.autocrlf", "GIT_CONFIG_VALUE_0": "true"}
+        with tempfile.TemporaryDirectory() as temp_dir, mock.patch.dict(os.environ, windows_git):
+            names = []
+            for name in ("a.html", "b.html"):
+                names.append(os.path.join(temp_dir, name))
+                with open(names[-1], "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write("<p>same</p>\n")
+            self.assertEqual(git_diff(*names), ("", None))
+
     def test_difference_is_not_an_error(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             names = []

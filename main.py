@@ -72,9 +72,13 @@ def git_diff(old_file: str, new_file: str) -> tuple:
     :param new_file:
     :return:
     """
+    # Without these settings, Git for Windows (core.autocrlf=true) warns on stderr about
+    # every LF file and hides line-ending differences.
+    command = ["git", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false",
+               "diff", "--no-index", old_file, new_file]
     try:
-        done = subprocess.run(["git", "diff", "--no-index", old_file, new_file], stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        done = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              encoding="utf-8", errors="replace")
     except OSError as error:
         return "", f"git diff failed: {error}"
     if done.returncode > 1 or done.stderr.strip():
