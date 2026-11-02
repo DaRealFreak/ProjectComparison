@@ -316,7 +316,8 @@ The repository includes empty `cookies_live.json` and `cookies_dev.json` as star
 2. **`site_comparator.py`** runs a headless Selenium Chrome session and handles screenshots
    (windowed and full-page via CDP) and cookie loading.
 3. **`image_comparator.py`** computes the mean per-pixel difference between two screenshots
-   using Pillow and writes a diff image when they differ.
+   using Pillow and writes a diff image when they differ. Screenshots of different size
+   are compared on a canvas of the larger size; the extra area counts as fully different.
 4. **`main.py`** (`PageDiffProcessor`) orchestrates everything per page — capture, HTML
    diff, screenshot diff, pass/fail logging — and drives the optional recursive crawl.
 ```

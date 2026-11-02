@@ -89,7 +89,9 @@ The flow is a single pass orchestrated by `PageDiffProcessor` in `main.py`:
 3. `ImageComparator` (`image_comparator.py`) computes the **mean per-pixel difference** with
    PIL (`ImageChops.difference` → `ImageStat`). A page "fails" on images when this average
    exceeds `--threshold`; a diff PNG is written only when over threshold (or with
-   `--always-generate-diff`).
+   `--always-generate-diff`). Screenshots of different size are compared on a canvas of
+   the larger size, and the area only one of them covers counts as fully different, so a
+   page that grew or shrank never scores 0.
 4. `PageDiffProcessor.process_page` ties it together per URL: capture live, capture dev,
    write `html_live.html` / `html_dev.html`, run the git HTML diff, compare each requested
    resolution, then log a per-page `[PASS]`/`[FAIL]` line (colored via `logging_config`).
