@@ -692,6 +692,12 @@ def main():
             states = load_states(args.states)
         except StateFileError as e:
             parser.error(str(e))
+    if baseline_dir:
+        # Before any cleanup: removing the output directory must not delete the baseline.
+        try:
+            baseline.check_dirs_apart(baseline_dir, args.output_dir)
+        except baseline.BaselineError as e:
+            parser.error(str(e))
     logging_config.setup_logging(args.log_level)
 
     output_dir = args.output_dir

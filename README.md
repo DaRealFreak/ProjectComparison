@@ -254,7 +254,9 @@ reported as `[FAIL]`. Use `--dev-cookies` for cookies in the baseline modes.
 Both modes also **refuse to run (exit code 2)** when the `--urls` file lists no URL or lists
 a URL that is not below the base URL. A capture refuses when `DIR` already holds a
 baseline; add `--remove-previous_results` to replace it. These checks run before anything
-in `DIR` is deleted.
+in `DIR` is deleted. Both modes also refuse when `--output-dir` is the baseline directory,
+lies inside it or contains it (compared after resolving symbolic links), so
+`--remove-previous_results` can never delete the baseline.
 
 A capture **exits with code 1** when a page failed to load or a state failed
 (`[FAIL] <page>: state <id> <size> failed: <reason>`). The baseline is still written, so a

@@ -56,12 +56,12 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(input_mismatches(MANIFEST, "playwright", ["800x600"], "abc", False, None), [])
 
     def test_user_agent_mismatch_refused_by_cli(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir, tempfile.TemporaryDirectory() as output_dir:
             write_baseline_manifest(temp_dir, dict(MANIFEST, statesSha256=None))
             run = subprocess.run(
                 [sys.executable, "main.py", "--compare-baseline", temp_dir, "http://127.0.0.1:1/",
                  "--engine", "playwright", "--sizes", "800x600", "--user-agent", "Bot/1",
-                 "--output-dir", os.path.join(temp_dir, "results")],
+                 "--output-dir", output_dir],
                 cwd=REPO_ROOT, capture_output=True, text=True, timeout=60)
         self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
         self.assertIn("user agent: baseline default, run Bot/1", run.stderr)
@@ -248,6 +248,27 @@ class CommandLineTest(unittest.TestCase):
                                 "--output-dir", os.path.join(temp_dir, "results"))
             self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
             self.assertIn("lists no URL", run.stderr)
+
+    def test_output_dir_overlapping_the_baseline_is_refused_without_deleting(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target, stored = self.make_baseline(temp_dir)
+            inside = os.path.join(target, "pages")
+            outside = temp_dir
+            for output_dir in (target, inside, outside, os.path.join(target, "..", "base")):
+                run = self.run_main("--compare-baseline", target, "http://127.0.0.1:1/", "--engine", "playwright",
+                                    "--sizes", "800x600", "--output-dir", output_dir, "--remove-previous_results")
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn("overlaps the baseline directory", run.stderr)
+                self.assertTrue(os.path.isfile(stored), output_dir)
+
+    def test_capture_target_overlapping_the_output_dir_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target, stored = self.make_baseline(temp_dir)
+            run = self.run_main("--capture-baseline", target, "http://127.0.0.1:1/", "--engine", "playwright",
+                                "--output-dir", temp_dir, "--remove-previous_results")
+            self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+            self.assertIn("overlaps the baseline directory", run.stderr)
+            self.assertTrue(os.path.isfile(stored))
 
     def test_page_key_follows_prefix_rule(self):
         self.assertEqual(baseline.page_key("http://h/", "http://h/"), "/")

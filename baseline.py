@@ -112,6 +112,20 @@ def check_capture_target(baseline_dir: str, replace: bool) -> None:
                             f"add --remove-previous_results to replace it")
 
 
+def check_dirs_apart(baseline_dir: str, output_dir: str) -> None:
+    """Refuse equal, nested or enclosing directories, so cleaning one cannot delete the other."""
+    baseline_real = os.path.realpath(baseline_dir)
+    output_real = os.path.realpath(output_dir)
+    try:
+        overlap = os.path.commonpath([baseline_real, output_real]) in (baseline_real, output_real)
+    except ValueError:
+        # Different drives on Windows.
+        overlap = False
+    if overlap:
+        raise BaselineError(f"output directory {output_dir} overlaps the baseline directory {baseline_dir}: "
+                            f"use two separate directories")
+
+
 def _fail(message: str) -> None:
     logger.info(message)
     print(logging_config.COLOR_FAIL + message + logging_config.RESET_ALL)
