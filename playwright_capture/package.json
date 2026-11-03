@@ -1,0 +1,12 @@
+{
+  "name": "playwright-capture",
+  "private": true,
+  "type": "module",
+  "description": "Capture helper for ProjectComparison: HTML, screenshots and interaction states.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "playwright": "1.64.0-alpha-1790635538000"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "states": [
+    {
+      "id": "box-open",
+      "when": "#open",
+      "steps": [
+        { "action": "click", "selector": "#open" },
+        { "action": "waitFor", "selector": "#box" }
+      ]
+    }
+  ]
+}

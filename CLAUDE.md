@@ -32,13 +32,41 @@ python main.py <live> <dev> --live-cookies cookies_live.json --dev-cookies cooki
 python main.py <live> <dev> --htuser user --htpass secret
 ```
 
-There is **no test suite and no linter configured** in this repo (only a PyCharm `.idea/`).
-Don't claim to have run either; if you add test infrastructure, surface that as its own change.
+```bash
+# Playwright engine, interaction states and baselines (see "Playwright engine" below)
+python main.py <live> <dev> --engine playwright --states states.json
+python main.py --capture-baseline baselines/site <url> --engine playwright
+python main.py --compare-baseline baselines/site <url> --engine playwright
+
+# Tests
+python -m unittest discover -s tests -p "test_*.py"                       # unit tests, no Node needed
+python -m unittest tests.test_states tests.test_playwright_engine tests.test_baseline
+(cd playwright_capture && node --test)                                    # helper tests, need Node + Chromium
+python tests/smoke_test.py                                                # Selenium end to end
+python tests/playwright_smoke_test.py                                     # Playwright end to end
+python tests/baseline_smoke_test.py                                       # baseline end to end
+```
+
+There is **no linter configured** (only a PyCharm `.idea/`). Tests are stdlib `unittest`
+(`tests/test_*.py`) plus `node --test` for the helper; the smoke tests run the real tool.
+CI (`.github/workflows/ci.yml`) runs the unit tests and the Selenium smoke test on Linux,
+Windows and macOS, and the `playwright` job (Linux only) runs the Node tests, the Playwright
+unit tests and both Playwright smoke tests. The unit tests mock `node`/`npm`, so they need
+neither. Don't claim to have run a suite you did not run.
 
 ## Runtime requirements (non-obvious)
 
+- **Playwright engine only: Node >= 20.** `--engine playwright` checks `node --version` and
+  runs `npm ci --prefix playwright_capture` once if `playwright_capture/node_modules/playwright`
+  is missing. Browsers are not downloaded by the tool: they must already exist (in DDEV they
+  are baked into `PLAYWRIGHT_BROWSERS_PATH`; elsewhere run `npx playwright install chromium`
+  in `playwright_capture/`). A missing or too old Node or a failed `npm ci` exits with
+  code 2.
+
 - **`git` must be on PATH at runtime.** HTML diffing shells out to `git diff --no-index`
-  (`main.py`), not a Python diff library.
+  (`main.py`, `git_diff`), not a Python diff library. git exits 1 both for a difference and
+  for an unreadable file, so `git_diff` treats any stderr output or an exit code above 1
+  as an error, which fails the page (or the state).
 - **Network access on first run.** `ChromeInstaller` downloads Chrome + chromedriver from
   the Chrome for Testing endpoints into `tmp/` (cached across runs). `--version` pins a
   build; default `latest` queries the LATEST_RELEASE_STABLE endpoint.
@@ -61,7 +89,9 @@ The flow is a single pass orchestrated by `PageDiffProcessor` in `main.py`:
 3. `ImageComparator` (`image_comparator.py`) computes the **mean per-pixel difference** with
    PIL (`ImageChops.difference` → `ImageStat`). A page "fails" on images when this average
    exceeds `--threshold`; a diff PNG is written only when over threshold (or with
-   `--always-generate-diff`).
+   `--always-generate-diff`). Screenshots of different size are compared on a canvas of
+   the larger size, and the area only one of them covers counts as fully different, so a
+   page that grew or shrank never scores 0.
 4. `PageDiffProcessor.process_page` ties it together per URL: capture live, capture dev,
    write `html_live.html` / `html_dev.html`, run the git HTML diff, compare each requested
    resolution, then log a per-page `[PASS]`/`[FAIL]` line (colored via `logging_config`).
@@ -86,8 +116,96 @@ The flow is a single pass orchestrated by `PageDiffProcessor` in `main.py`:
 - **Cookies** are JSON arrays of Selenium cookie dicts (`cookies_live.json`,
   `cookies_dev.json` are committed examples). They're applied *after* an initial navigation
   so the domain is set, then the page is reloaded.
-- **HTTP Basic Auth** is injected directly into the URL (`inject_auth`,
+- **HTTP Basic Auth** is injected directly into the URL at navigation time (`inject_auth`,
   `https://user:pass@host/...`), URL-encoding credentials and stripping any existing auth.
+  `main()` first removes `user:pass@` from every input URL (positional and `--urls`;
+  `baseline.split_credentials`) and moves it into `args.htuser`/`args.htpass`, so logs,
+  `baseline.json`, keys and request files only hold the clean URL. URL credentials apply
+  per side (`args.side_auth`, `credentials_for(label)`); `--htuser/--htpass` apply to both.
+  Conflicting values exit 2. `RedactCredentials` (logging_config) also masks `scheme://user:pw@`
+  in every log record, e.g. selenium's DEBUG lines.
+
+## Playwright engine, states and baselines
+
+`--engine playwright` (default `selenium`) replaces step 2 above: `playwright_engine.py`
+writes a request file and runs the Node helper `playwright_capture/capture.mjs` once per
+side and page. The helper writes the same file names as the Selenium path
+(`html_<label>.html`, `<WxH>_<label>.png`, `fullscreen_<label>.png`) plus the state files
+below, and prints one JSON result. Python does all diffing. Cookies are converted from the
+Selenium format; credentials and cookies are never printed or stored in a baseline.
+
+- `--htuser`/`--htpass` are given to Playwright for the page URL's origin only, so a
+  third-party host that answers 401 does not get the password.
+- Every screenshot size is a fresh page load, so the result does not depend on the order
+  of `--sizes`. The HTML and the HTTP status come from the first `WxH`; `fullscreen` is
+  taken at a 1920x1080 viewport, as in the Selenium path.
+- Each load (base size, or state and width) runs in a new browser context with the same
+  cookies, credentials and user agent, so cookies and storage that one load sets do not
+  reach the next.
+- `compare_status` compares the HTTP status (stored vs dev in a baseline compare): a
+  difference is `[FAIL] <path>: status <live> on live, <dev> on dev`; the same status
+  >= 400 on both sides is only `[WARN] <path>: status <n> on both sides`. `<path>` is the
+  path below the base URL. The Selenium engine has no status (`None` on both sides).
+
+**Pin.** `playwright_capture/package.json` pins `playwright` to
+`1.64.0-alpha-1790635538000`. That is the version the typo3-upgrade skill's DDEV
+agent-tooling layer bakes into the container, with its browsers in
+`PLAYWRIGHT_BROWSERS_PATH`. Keep both in step, or the baked browsers will not match the
+package. The helper must not override that variable. Do not bump the pin alone.
+
+**State file** (`--states FILE`, validated by `states.py`, needs `--engine playwright`):
+
+```json
+{"version": 1, "states": [
+  {"id": "menu-open", "when": ".nav-toggle", "sizes": ["375x667"],
+   "steps": [{"action": "click", "selector": ".nav-toggle", "index": 0},
+             {"action": "waitFor", "selector": ".nav.open"}]}
+]}
+```
+
+- `id`: `^[a-z0-9][a-z0-9-]*$`, unique. `steps`: non-empty. `when` (optional CSS selector):
+  the state applies only if it matches at least one element. `sizes` (optional list of
+  `WxH`): widths for this state; default is the run's `--sizes`. `fullscreen` never applies;
+  a state left with no width is refused at startup (exit 2, `states_without_widths`).
+- Actions: `click`, `hover`, `focus`, `waitFor` need `selector` (optional `index`, default 0);
+  `press` needs `key`; `wait` needs `ms` (1 to 10000).
+- Each state and width is captured on a fresh page load. Files:
+  `state-<id>_<WxH>_html_<label>.html` and `state-<id>_<WxH>_<label>.png`; diffs are
+  `state-<id>_<WxH>_html-difference.diff` and `state-<id>_<WxH>_screenshot_diff.png`.
+
+**Outcomes.** The helper reports one entry per state and width: `absent` (`when` matched
+nothing), `captured`, or `failed` (a step errored or timed out, with a reason). The
+expected list comes from the state file, not from what the helper returned, so a crashed
+side cannot pass. Rules (`compare_state_outcomes`): `captured` on both sides is diffed
+(HTML and screenshot); `absent` on both sides is "not applicable" and only logged; every
+other combination, including `failed` and a missing entry, is a `[FAIL]` line
+(`[FAIL] state <id> <size>: <outcomes> ...`). For `captured` on both sides, every file the
+comparison needs (both HTML files, and both PNGs unless `--omit-screenshots`) must exist,
+else `[FAIL] state <id> <size>: missing file <name>`. A state failure fails the page.
+
+**Baselines.** `--capture-baseline DIR <url>` captures the pages once and stores them as
+the "live" side; `--compare-baseline DIR <url>` captures the current site as "dev" and
+compares. Both need `--engine playwright`, take exactly one URL (the base URL) and accept
+`--urls FILE` (one URL per line, `#` comments; each must be below the base URL) and
+`--dev-cookies` only. Layout: `DIR/baseline.json` plus `DIR/pages/<page-dir>/` with the
+stored files. `baseline.json` (version 1) holds `baseUrl`, `engine`, `sizes`,
+`omitScreenshots`, `statesSha256`, `cookiesSha256`, `userAgent`, `createdAt` and per-page
+`url`, `dir`, `ok`, `error`, `status`, `files`, `states`. Pages are keyed by their path
+below the base URL, so the base URL may differ between capture and compare. A compare
+**refuses and exits 2** when engine, sizes, the sha256 of the state file, the screenshot
+mode (`--omit-screenshots`) or the user agent differ ("the run differs from the baseline:
+..."). A different `cookiesSha256` only prints `[WARN] cookies differ from the baseline`
+and continues. A page in
+the baseline but not in the run, or the reverse, is a `[FAIL]`, as is a missing stored file.
+Both modes refuse (exit 2) an empty `--urls` list or a URL outside the base URL, and a
+capture refuses an existing `baseline.json` unless `--remove-previous_results` is given.
+`main.py` runs these checks before the engine starts and before `DIR/pages/` is cleared.
+`--recursive` and `--recursive-max-level` are refused in the baseline modes.
+A capture exits 1 when a page failed to load or a state failed (`[FAIL] <key>: state <id>
+<size> failed: <reason>`); `baseline.json` is still written.
+
+`--list-capabilities` prints `{"engines": ["selenium", "playwright"], "states": 1, "baseline": 1}`
+and exits; other tools use it to detect support.
 
 ## Conventions
 
@@ -95,5 +213,6 @@ The flow is a single pass orchestrated by `PageDiffProcessor` in `main.py`:
   `fullscreen`. Internally resolutions are `(w, h)` tuples or the string `"fullscreen"` —
   preserve this dual representation when touching screenshot/diff code.
 - The clean-output flag is spelled `--remove-previous_results` (mixed dash/underscore,
-  unlike the other flags) and deletes the entire `--output-dir` before running.
+  unlike the other flags) and deletes the entire `--output-dir` before running. With
+  `--capture-baseline` it instead allows replacing an existing baseline in `DIR`.
 - `results/`, `tmp/`, `__pycache__/`, and `*.diff` are gitignored.

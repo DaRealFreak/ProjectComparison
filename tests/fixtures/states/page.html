@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>States fixture</title>
+<style>
+  #box { display: none; }
+  #box.show { display: block; }
+  #wide-only { display: none; }
+  @media (min-width: 1000px) { #wide-only { display: inline-block; } }
+</style>
+</head>
+<body>
+<button id="open" onclick="document.getElementById('box').classList.add('show')">Open</button>
+<button id="wide-only">Wide only</button>
+<div id="box">Box content</div>
+</body>
+</html>
