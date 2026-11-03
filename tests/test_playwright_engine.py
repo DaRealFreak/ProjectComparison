@@ -53,11 +53,52 @@ class EngineReadinessTest(unittest.TestCase):
             return subprocess.CompletedProcess(command, 1, stdout="", stderr="first\nnpm ERR! offline\n")
 
         with tempfile.TemporaryDirectory() as tool_dir:
-            with mock.patch.object(playwright_engine.subprocess, "run", side_effect=fake_run):
+            with mock.patch.object(playwright_engine.shutil, "which", side_effect=lambda name: name), \
+                    mock.patch.object(playwright_engine.subprocess, "run", side_effect=fake_run):
                 with self.assertRaises(EngineUnavailable) as caught:
                     PlaywrightEngine(tool_dir).ensure_ready()
         self.assertIn("npm ERR! offline", str(caught.exception))
         self.assertEqual(calls[1][:2], ["npm", "ci"])
+
+    def test_tools_are_resolved_through_the_path_lookup(self):
+        # On Windows npm is npm.cmd: only the lookup finds it, a bare "npm" fails with WinError 2.
+        found = {"node": r"C:\nodejs\node.exe", "npm": r"C:\nodejs\npm.cmd"}
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            if command[0] == found["node"]:
+                return subprocess.CompletedProcess(command, 0, stdout="v22.1.0\n", stderr="")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as tool_dir:
+            with mock.patch.object(playwright_engine.shutil, "which", side_effect=found.get), \
+                    mock.patch.object(playwright_engine.subprocess, "run", side_effect=fake_run):
+                PlaywrightEngine(tool_dir).ensure_ready()
+        self.assertEqual(calls[0], [found["node"], "--version"])
+        self.assertEqual(calls[1][:2], [found["npm"], "ci"])
+
+    def test_missing_npm_reports_engine_unavailable(self):
+        node = subprocess.CompletedProcess(["node", "--version"], 0, stdout="v22.1.0\n", stderr="")
+        with tempfile.TemporaryDirectory() as tool_dir:
+            with mock.patch.object(playwright_engine.shutil, "which",
+                                   side_effect=lambda name: "node" if name == "node" else None), \
+                    mock.patch.object(playwright_engine.subprocess, "run", return_value=node):
+                with self.assertRaises(EngineUnavailable) as caught:
+                    PlaywrightEngine(tool_dir).ensure_ready()
+        self.assertIn("npm", str(caught.exception))
+
+    def test_npm_that_cannot_start_reports_engine_unavailable(self):
+        def fake_run(command, **kwargs):
+            if command[1] == "--version":
+                return subprocess.CompletedProcess(command, 0, stdout="v22.1.0\n", stderr="")
+            raise OSError(2, "The system cannot find the file specified")
+
+        with tempfile.TemporaryDirectory() as tool_dir:
+            with mock.patch.object(playwright_engine.subprocess, "run", side_effect=fake_run):
+                with self.assertRaises(EngineUnavailable) as caught:
+                    PlaywrightEngine(tool_dir).ensure_ready()
+        self.assertIn("npm", str(caught.exception))
 
 
 class RequestPathsTest(unittest.TestCase):

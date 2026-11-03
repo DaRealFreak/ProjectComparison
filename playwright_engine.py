@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from typing import Optional
@@ -19,6 +20,8 @@ class EngineUnavailable(RuntimeError):
 
 
 class PlaywrightEngine:
+    # Node and npm are looked up with shutil.which: on Windows npm is npm.cmd, and a bare "npm" fails with
+    # WinError 2 because CreateProcess only adds ".exe".
     def __init__(self, tool_dir: str, timeout_ms: int = 5000):
         self.helper_dir = os.path.join(tool_dir, "playwright_capture")
         self.tool_dir = tool_dir
@@ -28,18 +31,27 @@ class PlaywrightEngine:
         self._check_node()
         if os.path.isdir(os.path.join(self.helper_dir, "node_modules", "playwright")):
             return
-        install = subprocess.run(
-            ["npm", "ci", "--prefix", "playwright_capture"], cwd=self.tool_dir,
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
+        npm = shutil.which("npm")
+        if npm is None:
+            raise EngineUnavailable("npm is required to install the capture helper, found none")
+        try:
+            install = subprocess.run(
+                [npm, "ci", "--prefix", "playwright_capture"], cwd=self.tool_dir,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+        except OSError as error:
+            raise EngineUnavailable(f"npm could not start: {error}") from None
         if install.returncode != 0:
             lines = [line for line in install.stderr.splitlines() if line.strip()]
             raise EngineUnavailable(f"npm ci failed: {lines[-1] if lines else 'no error output'}")
 
     @staticmethod
     def _check_node() -> None:
+        node = shutil.which("node")
+        if node is None:
+            raise EngineUnavailable("Node 20 or newer is required, found none")
         try:
-            done = subprocess.run(["node", "--version"], capture_output=True, text=True)
+            done = subprocess.run([node, "--version"], capture_output=True, text=True)
         except OSError:
             raise EngineUnavailable("Node 20 or newer is required, found none") from None
         found = done.stdout.strip()
@@ -69,7 +81,8 @@ class PlaywrightEngine:
             os.unlink(request_file.name)
 
     def _run_helper(self, request_path: str) -> dict:
-        command = ["node", os.path.join(self.helper_dir, "capture.mjs"), "--request", request_path]
+        command = [shutil.which("node") or "node", os.path.join(self.helper_dir, "capture.mjs"),
+                   "--request", request_path]
         try:
             done = subprocess.run(
                 command, cwd=self.tool_dir, capture_output=True, text=True,
