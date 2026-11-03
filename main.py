@@ -102,8 +102,9 @@ def inject_auth(url: str, username: str, password: str) -> str:
     parsed = urlparse(url)
     # remove any existing auth credentials.
     netloc = parsed.netloc.split("@")[-1]
-    # URL-encode the username and password in case they contain special characters.
-    user_info = f"{quote(username)}:{quote(password)}"
+    # Encode every reserved character, "/" included: an unencoded "/" ends the authority, so the browser rejects
+    # the URL and the log redaction no longer sees the password as userinfo.
+    user_info = f"{quote(username, safe='')}:{quote(password, safe='')}"
     new_netloc = f"{user_info}@{netloc}"
     new_parsed = parsed._replace(netloc=new_netloc)
     return str(urlunparse(new_parsed))

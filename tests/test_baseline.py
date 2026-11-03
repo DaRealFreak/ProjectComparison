@@ -18,7 +18,7 @@ import baseline  # noqa: E402
 import logging_config  # noqa: E402
 from baseline import input_mismatches, read_baseline_manifest, write_baseline_manifest  # noqa: E402
 from image_comparator import ImageComparator  # noqa: E402
-from main import PageDiffProcessor  # noqa: E402
+from main import PageDiffProcessor, inject_auth  # noqa: E402
 
 MANIFEST = {
     "version": 1, "baseUrl": "http://a.example", "engine": "playwright", "sizes": ["800x600"],
@@ -345,6 +345,19 @@ class SideCredentialsTest(unittest.TestCase):
                     selenium_processor.capture_page(url, label, temp_dir)
             self.assertEqual(calls[0]["get"], "http://lu:lp@l/")
             self.assertEqual(calls[1]["get"], "http://d/")
+
+
+class InjectAuthTest(unittest.TestCase):
+    def test_reserved_characters_are_encoded(self):
+        url = inject_auth("https://h.example/p", "us/er", "part/secret:x@y")
+        self.assertEqual(url, "https://us%2Fer:part%2Fsecret%3Ax%40y@h.example/p")
+
+    def test_encoded_slash_survives_the_round_trip(self):
+        clean, credentials = baseline.split_credentials("https://u:part%2Fsecret@h.example/p")
+        self.assertEqual(credentials, ("u", "part/secret"))
+        url = inject_auth(clean, *credentials)
+        self.assertEqual(url, "https://u:part%2Fsecret@h.example/p")
+        self.assertNotIn("secret", logging_config.redact_credentials(f"POST {{'url': '{url}'}}"))
 
 
 class LogRedactionTest(unittest.TestCase):
